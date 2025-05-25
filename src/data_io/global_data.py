@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import numpy as np
 
+from typing import List
+
 class GlobalData:
     def __init__(self, path):
         self.working_dir = path
@@ -15,8 +17,14 @@ class GlobalData:
 
         df = pd.merge(pressure_df, ivus_df, left_on='patient_id', right_on='narco_id')
         df.drop(columns=['narco_id'])
+
+        self.df_all = df
+        ids = self.collect_ids()
         
-        return df
+        return df, ids
+    
+    def collect_ids(self) -> List:
+        return self.df_all["patient_id"].unique()
 
     def load_pressure_data(self) -> pd.DataFrame:
         dir = os.path.join(self.working_dir, "results.xlsx")
