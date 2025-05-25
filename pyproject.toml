@@ -1,0 +1,21 @@
+[project]
+name = "aaoca_ivus_analysis"
+version = "0.1.0"
+description = "IVUS combination with pressure curves"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.5",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2.3",
+    "loguru>=0.7.3",
+]
+
+[build-system]
+requires = ["setuptools>=65.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]  # looks for packages in src directory
+include = ["*"] 

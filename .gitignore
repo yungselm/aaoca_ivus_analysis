@@ -1,0 +1,4 @@
+/.venv
+/data_eacvi
+*.egg-info
+*.pyc
