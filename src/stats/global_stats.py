@@ -1,5 +1,5 @@
 import os
-from scipy.stats import wilcoxon, shapiro, ttest_rel
+from scipy.stats import wilcoxon, shapiro, ttest_rel, ranksums, ttest_ind
 
 import numpy as np
 import pandas as pd
@@ -25,11 +25,15 @@ class GlobalStats:
     def global_stats(self):
         self.plot_global_change()
         self.pairwise_rest_stress()
+        _ = self.pairwise_pressure_cutoff(cutoff_var="iFR_mean_stress", cutoff=0.8)
 
     def pairwise_rest_stress(self):
         """Compare rest vs. stress metrics using appropriate statistical tests."""
+        # replace 'dobu' with 'stress' in column names
+        self.global_data.columns = self.global_data.columns.str.replace('dobu', 'stress', regex=False)
         # 1. Filter numeric columns only
         numeric_cols = self.global_data.select_dtypes(include=np.number).columns.tolist()
+
         valid_cols = [
             col for col in self.global_data.columns 
             if ("rest" in col or "stress" in col) and col in numeric_cols
@@ -121,98 +125,76 @@ class GlobalStats:
         
         self.stats_df = pd.DataFrame(results)
         logger.success(f"Generated stats for {len(results)} metrics")
-        print(self.stats_df)
        
-    def pairwise_pressure_cutoff(self):
-        pass
+    def pairwise_pressure_cutoff(self, cutoff_var="iFR_mean_stress", cutoff=0.8):
+        """Compare metrics between groups above vs. below/equal to cutoff."""
+        # Validate cutoff variable exists
+        if cutoff_var not in self.global_data.columns:
+            logger.error(f"Cutoff variable '{cutoff_var}' not found")
+            return
 
-    # def plot_global_change(self, mode="pressure", phases=None):
-    #     """
-    #     Plot paired boxplots for either:
-    #       - pressure: pdpa_mean_*, iFR_mean_* 
-    #       - lumen: ostial_a_*, mla_*
-    #         mln: ostial_*_mln, mla_*_mln
+        # Split into groups
+        above_mask = self.global_data[cutoff_var] > cutoff
+        group_above = self.global_data[above_mask]
+        group_below = self.global_data[~above_mask]
+        
+        logger.info(f"Group sizes - Above: {len(group_above)}, Below/Equal: {len(group_below)}")
 
-    #     Parameters:
-    #       - mode: "pressure" or "lumen"
-    #       - phases: list of suffixes to include. If None:
-    #           * pressure → ["rest", "dobu"]
-    #           * lumen    → ["rest", "stress"]
-    #         Overrides for pressure only; lumen always uses rest & stress.
-    #     """
-    #     # Determine phases based on mode
-    #     if mode == "lumen":
-    #         phases = ["rest", "stress"]
-    #     elif phases is None:
-    #         phases = ["rest", "dobu"]
+        results = []
 
-    #     # Validate mode
-    #     if mode not in ("pressure", "lumen"):
-    #         logger.error(f"Invalid mode: {mode}. Use 'pressure' or 'lumen'.")
-    #         return
+        metrics = self.global_data.columns.tolist()
 
-    #     # Validate enough phases
-    #     if len(phases) < 2:
-    #         logger.warning("At least two phases are required for plotting.")
-    #         return
-
-    #     # Configure prefixes and titles
-    #     if mode == "pressure":
-    #         left_base, right_base = "pdpa_mean_", "iFR_mean_"
-    #         left_title, right_title = "PDPA Mean", "iFR Mean"
-    #         right_hline, right_hline_label = 0.8, "iFR = 0.8"
-    #     elif mode == "lumen":  # lumen
-    #         left_base, right_base = "ostial_a_", "mla_"
-    #         left_title, right_title = "Ostial Area", "MLA Area"
-    #         right_hline, right_hline_label = None, None
-    #     else: # mln
-    #         left_base, right_base = "ostial_", "mla_"
-    #         left_title, right_title = "Ostial Area (MLN)", "MLA Area (MLN)"
-    #         right_hline, right_hline_label = None, None
-
-    #     # Build column lists and verify
-    #     left_cols  = [f"{left_base}{ph}" for ph in phases]
-    #     right_cols = [f"{right_base}{ph}" for ph in phases]
-    #     missing = [c for c in left_cols + right_cols if c not in self.global_data.columns]
-    #     if missing:
-    #         logger.error(f"Missing columns for mode '{mode}': {missing}")
-    #         return
-
-    #     # Create plots
-    #     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=False)
-
-    #     # Left subplot
-    #     ax = axes[0]
-    #     self.global_data[left_cols].boxplot(ax=ax)
-    #     ax.set_title(left_title)
-    #     ax.set_ylabel("Value")
-    #     ax.set_xticklabels([ph.capitalize() for ph in phases])
-    #     if right_hline is not None:
-    #         ax.axhline(right_hline, color="red", linestyle="--", label="PdPa = 0.8")
-    #         ax.legend()
-    #     ax.grid(True, linestyle="--", alpha=0.6)
-    #     for _, row in self.global_data.iterrows():
-    #         ax.plot(range(1, len(phases)+1), row[left_cols], color="gray", alpha=0.7, linewidth=1)
-
-    #     # Right subplot
-    #     ax = axes[1]
-    #     self.global_data[right_cols].boxplot(ax=ax)
-    #     ax.set_title(right_title)
-    #     ax.set_ylabel("Value")
-    #     ax.set_xticklabels([ph.capitalize() for ph in phases])
-    #     if right_hline is not None:
-    #         ax.axhline(right_hline, color="red", linestyle="--", label=right_hline_label)
-    #         ax.legend()
-    #     ax.grid(True, linestyle="--", alpha=0.6)
-    #     for _, row in self.global_data.iterrows():
-    #         ax.plot(range(1, len(phases)+1), row[right_cols], color="gray", alpha=0.7, linewidth=1)
-
-    #     plt.tight_layout()
-    #     filename = f"global_{mode}_{'_'.join(phases)}.png"
-    #     out_path = os.path.join(self.output_dir, filename)
-    #     plt.savefig(out_path)
-    #     # plt.show()
-    #     logger.info(f"Saved plot to: {out_path}")
+        for metric in metrics:
+            # Get data for both groups
+            data_above = group_above[metric].dropna()
+            data_below = group_below[metric].dropna()
+            
+            # Check minimum sample sizes
+            if len(data_above) < 6 or len(data_below) < 6:
+                logger.debug(f"Skipping {metric}: insufficient samples (Above={len(data_above)}, Below={len(data_below)})")
+                continue
+                
+            # Normality checks
+            try:
+                _, p_above = shapiro(data_above)
+                _, p_below = shapiro(data_below)
+                normal = (p_above > 0.05) and (p_below > 0.05)
+            except ValueError as e:
+                logger.warning(f"Normality check failed for {metric}: {str(e)}")
+                continue
+                
+            # Choose test
+            if normal:
+                stat, p = ttest_ind(data_above, data_below)
+                test = "t-test"
+            else:
+                stat, p = ranksums(data_above, data_below)  # Wilcoxon rank-sum
+                test = "Wilcoxon"
+                
+            # Calculate effect sizes
+            mad_above = np.median(np.abs(data_above - np.median(data_above)))
+            mad_below = np.median(np.abs(data_below - np.median(data_below)))
+            
+            results.append({
+                "metric": metric,
+                "above_median": np.median(data_above),
+                "above_mad": mad_above,
+                "below_median": np.median(data_below),
+                "below_mad": mad_below,
+                "statistic": stat,
+                "p_value": p,
+                "test": test,
+                "n_above": len(data_above),
+                "n_below": len(data_below)
+            })
+        
+        # Create and save results
+        self.cutoff_stats = pd.DataFrame(results)
+        output_path = os.path.join(self.output_dir, f"cutoff_{cutoff_var}_{cutoff}.csv")
+        self.cutoff_stats.to_csv(output_path, index=False)
+        
+        logger.success(f"Generated cutoff comparison stats for {len(results)} metrics")
+        print(self.cutoff_stats)
 
     def plot_global_change(self, mode="pressure", phases=None):
         """

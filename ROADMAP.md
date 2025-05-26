@@ -7,7 +7,9 @@
 
 ## Phase 2: Global statistics
 - [x] Plot pressure change FFR, PdPa, systolic ratio  (Change FFR, iFR)
-- [] Plot lumen change, maximal lumen narrowing change
+- [x] Plot lumen change, maximal lumen narrowing change
+- [x] Table rest versus stress
+- [x] Table iFR>0.8 versus iFR<=0.8 and FFR>0.8 versus FFR<=0.8
 - [] Correlate pressure change with lumen change
 - [] All IVUS measurements as predictors for FFR<=0.8
 - [] All IVUS measurements as predictors for iFR<=0.8
