@@ -30,7 +30,7 @@ def main():
 
     logger.info(f"Loaded Patient Data: {pat_data}")
     
-    patient_stats = PatientStats(pat_data, PATIENT_OUTPUT)
+    patient_stats = PatientStats(pat_data, PATIENT_OUTPUT, GLOBAL_OUTPUT)
     patient_stats.process_case()
 
 if __name__ == "__main__":
