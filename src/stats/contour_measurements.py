@@ -7,6 +7,7 @@ def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
 
     for contour_id in np.unique(arr[:, 0]):
         points = arr[arr[:, 0] == contour_id][:, 1:3]  # (x, y)
+        z = arr[arr[:, 0] == contour_id][0, 3]  # z value (assumed constant for the contour)
         n = len(points)
         if n < 3:
             continue  # Skip invalid contours
@@ -48,6 +49,6 @@ def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
         else:
             elliptic_ratio = max_dist / min_dist
 
-        results.append([contour_id, contour_id[3], area, min_dist, max_dist, elliptic_ratio])
+        results.append([contour_id, z, area, min_dist, max_dist, elliptic_ratio])
 
     return np.array(results, dtype=float)

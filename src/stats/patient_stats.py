@@ -14,6 +14,8 @@ class PatientStats:
         self.patient_data = patient_data
         self.output_dir = output_dir
         self._create_output_dir()
+        self.df_rest = pd.DataFrame()
+        self.df_stress = pd.DataFrame()
 
     def _create_output_dir(self):
         if not os.path.exists(self.output_dir):
@@ -23,8 +25,59 @@ class PatientStats:
             logger.info(f"Output directory already exists: {self.output_dir}")
 
     def process_case(self):
-        pass
+        self.compute_lumen_changes()
+        self.compute_sys_dia_properties(phase='rest')
+        self.compute_sys_dia_properties(phase='stress')
 
+    def compute_sys_dia_properties(self, phase='rest'):
+        if phase == 'rest':
+            dia_prop = compute_contour_properties(self.patient_data.rest_contours_dia)
+            sys_prop = compute_contour_properties(self.patient_data.rest_contours_sys)
+            d_p = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
+            d_t = self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
+        elif phase == 'stress':
+            dia_prop = compute_contour_properties(self.patient_data.stress_contours_dia)
+            sys_prop = compute_contour_properties(self.patient_data.stress_contours_sys)
+            d_p = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
+            d_t = self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
+        else:
+            logger.error(f"Invalid phase: {phase}. Use 'rest' or 'stress'.")
+            return
+
+        df = pd.DataFrame({
+            'contour_id': dia_prop[:, 0].astype(int),
+            'z_value': dia_prop[:, 1],
+            'delta_lumen_area': (dia_prop[:, 2] - sys_prop[:, 2]) / (d_p * d_t),
+            'delta_min_dist': (dia_prop[:, 3] - sys_prop[:, 3]) / (d_p * d_t),
+            'delta_max_dist': (dia_prop[:, 4] - sys_prop[:, 4]) / (d_p * d_t),
+            'delta_elliptic_ratio': (dia_prop[:, 5] - sys_prop[:, 5]) / (d_p * d_t),
+            'lumen_area_dia': dia_prop[:, 2],
+            'lumen_area_sys': sys_prop[:, 2],
+            'min_dist_dia': dia_prop[:, 3],
+            'min_dist_sys': sys_prop[:, 3],
+            'max_dist_dia': dia_prop[:, 4],
+            'max_dist_sys': sys_prop[:, 4],
+            'elliptic_ratio_dia': dia_prop[:, 5],
+            'elliptic_ratio_sys': sys_prop[:, 5]
+        })
+        df['z_value'] = df['z_value'].apply(lambda x: abs(x - df['z_value'].max()))
+
+        if phase == 'rest':
+            lumen_changes_path = os.path.join(self.output_dir, 'rest_lumen_changes.csv')
+        else:
+            lumen_changes_path = os.path.join(self.output_dir, 'stress_lumen_changes.csv')
+
+        if os.path.exists(lumen_changes_path):
+            lumen_df = pd.read_csv(lumen_changes_path)
+            df = df.merge(lumen_df, on='contour_id', how='left')
+            df.to_csv(lumen_changes_path, index=False)
+            if phase == 'rest':
+                self.df_rest = df
+            else:
+                self.df_stress = df
+        else:
+            logger.warning(f"Lumen changes file not found: {lumen_changes_path}")
+    
     def _calculate_lumen_change(self, contours_dia, contours_sys, delta_pressure, delta_time):
         """Calculate lumen change for each contour using PCA."""
         lumen_changes = []

@@ -28,9 +28,9 @@ def main():
     pat_data = individual_data.process_patient_data()
 
     logger.info(f"Loaded Patient Data: {pat_data}")
-
+    
     patient_stats = PatientStats(pat_data, PATIENT_OUTPUT)
-    patient_stats.compute_lumen_changes()
+    patient_stats.process_case()
 
 if __name__ == "__main__":
     main()

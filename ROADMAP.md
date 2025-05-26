@@ -6,11 +6,15 @@
 - [] Fix bugs in Loess data
 
 ## Phase 2: Global statistics
-- [] Plot pressure change FFR, PdPa, systolic ratio
+- [x] Plot pressure change FFR, PdPa, systolic ratio  (Change FFR, iFR)
+- [] Plot lumen change, maximal lumen narrowing change
 - [] Correlate pressure change with lumen change
-- [] Find Lumen changes that can predict relevant pressure change
+- [] All IVUS measurements as predictors for FFR<=0.8
+- [] All IVUS measurements as predictors for iFR<=0.8
 
 ## Phase 3: Patient statistics
-- [ ] Changes over intramural course, using PCA
-- [ ] Find regions of highest compression
-- [ ] Find predictors for FFRDobutamine <= 0.8 in regional data
+- [] Quantify dynamics for pulsatile/stress-induced lumen changes
+- [] Where most dynamics?
+- [] Pulsatile as predictor for FFR/iFR <=0.8
+- [] Pulsatile in combination with anatomical for prediction
+- [] Vessels with more dynamic more often relevant?
