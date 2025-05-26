@@ -19,10 +19,11 @@ def main():
     
     global_stats = GlobalStats(glob_df, GLOBAL_OUTPUT)
     # Plot default (rest & dobu) pressure metrics
-    global_stats.plot_global_change()
+    global_stats.global_stats()
 
     # Plot only rest vs dobu for lumen metrics
-    global_stats.plot_global_change(phases=["rest", "dobu"], mode="lumen")
+    global_stats.plot_global_change(mode="lumen")
+    global_stats.plot_global_change(mode="mln")
 
     individual_data = LoadIndividualData(GLOBAL_PATH, 'narco_119')
     pat_data = individual_data.process_patient_data()
