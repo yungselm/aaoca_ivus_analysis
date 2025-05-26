@@ -4,7 +4,7 @@ import pandas as pd
 from loguru import logger
 
 from pathlib import Path
-from typing import Tuple, List, Dict
+from typing import Tuple, List
 
 class PatientData:
     def __init__(self, id=None):
@@ -240,7 +240,6 @@ class LoadIndividualData:
 
         if not dfs:
             return pd.DataFrame(columns=['measurement', 'phase', 'value', 'ci_lower', 'ci_upper'])
-        print(f'DFs: {dfs}')
         combined_df = pd.concat(dfs, ignore_index=True)
         combined_df['phase'] = combined_df['phase'].map({'D': 'dia', 'S': 'sys'}).fillna(combined_df['phase'])
         # Group by position and measurement, and compute mean for numeric columns
