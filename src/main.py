@@ -13,7 +13,7 @@ def main():
     glob_df, ids = global_data.create_global_df()
 
     pat_data = LoadIndividualData(GLOBAL_PATH, 'narco_119')
-    pat_data.process_pressure()
+    pat_data.process_patient_data()
 
 
 if __name__ == "__main__":
