@@ -1,5 +1,8 @@
 import os
 from scipy.stats import wilcoxon, shapiro, ttest_rel, ranksums, ttest_ind
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.exceptions import NotFittedError
 
 import numpy as np
 import pandas as pd
@@ -25,7 +28,10 @@ class GlobalStats:
     def global_stats(self):
         self.plot_global_change()
         self.pairwise_rest_stress()
-        _ = self.pairwise_pressure_cutoff(cutoff_var="iFR_mean_stress", cutoff=0.8)
+        self.pairwise_pressure_cutoff(cutoff_var="iFR_mean_stress", cutoff=0.8)
+        self.pairwise_pressure_cutoff(cutoff_var="pdpa_mean_stress", cutoff=0.8)
+        self.univariate_logistic_regression(target_var_cont="pdpa_mean_stress", target_cutoff=0.8)
+        self.univariate_logistic_regression(target_var_cont="iFR_mean_stress", target_cutoff=0.8)
 
     def pairwise_rest_stress(self):
         """Compare rest vs. stress metrics using appropriate statistical tests."""
@@ -194,7 +200,6 @@ class GlobalStats:
         self.cutoff_stats.to_csv(output_path, index=False)
         
         logger.success(f"Generated cutoff comparison stats for {len(results)} metrics")
-        print(self.cutoff_stats)
 
     def plot_global_change(self, mode="pressure", phases=None):
         """
@@ -284,3 +289,57 @@ class GlobalStats:
         out = os.path.join(self.output_dir, fname)
         plt.savefig(out)
         logger.info(f"Saved plot to: {out}")
+
+    def univariate_logistic_regression(self, target_var_cont="pdpa_mean_stress", target_cutoff=0.8):
+        """
+        Perform simple (univariate) logistic regression for each numeric feature.
+        Predicts a binary target derived from `target_var_cont` <= `target_cutoff`.
+        Saves results including coefficients, p-values (if available), and AUC scores.
+        """
+        from sklearn.model_selection import cross_val_predict
+        from sklearn.metrics import roc_auc_score
+        import statsmodels.api as sm
+
+        df = self.global_data.copy()
+        df["target"] = (df[target_var_cont] <= target_cutoff).astype(int)
+
+        results = []
+
+        numeric_features = df.select_dtypes(include=np.number).columns.drop("target", errors="ignore")
+        logger.info(f"Running univariate logistic regression on {len(numeric_features)} features.")
+
+        for feature in numeric_features:
+            try:
+                X = df[[feature]].dropna()
+                y = df.loc[X.index, "target"]
+
+                # Skip if not enough variation
+                if y.nunique() != 2 or len(X) < 10:
+                    logger.debug(f"Skipping {feature}: not enough class variation or data.")
+                    continue
+
+                # Use statsmodels for coefficient and p-value
+                X_sm = sm.add_constant(X)
+                model = sm.Logit(y, X_sm).fit(disp=0)
+                pred_prob = model.predict(X_sm)
+
+                auc = roc_auc_score(y, pred_prob)
+
+                results.append({
+                    "feature": feature,
+                    "coef": model.params[feature],
+                    "p_value": model.pvalues[feature],
+                    "auc": auc,
+                    "n_samples": len(y)
+                })
+
+            except Exception as e:
+                logger.warning(f"Failed on {feature}: {e}")
+                continue
+
+        results_df = pd.DataFrame(results)
+        results_df = results_df[results_df["p_value"] < 0.05]  # Filter significant features
+        results_df = results_df.sort_values(by="auc", ascending=False)
+        output_file = os.path.join(self.output_dir, f"logreg_univariate_{target_var_cont}_{target_cutoff}.csv")
+        results_df.to_csv(output_file, index=False)
+        logger.success(f"Univariate logistic regression results saved to {output_file}")

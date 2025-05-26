@@ -11,6 +11,7 @@ dependencies = [
     "pandas>=2.2.3",
     "loguru>=0.7.3",
     "scikit-learn>=1.6.1",
+    "statsmodels>=0.14.4",
 ]
 
 [build-system]
