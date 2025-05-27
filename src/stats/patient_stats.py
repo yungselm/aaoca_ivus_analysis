@@ -1,5 +1,4 @@
 import os
-
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -14,11 +13,35 @@ from typing import Tuple, List, Dict
 class PatientStats:
     def __init__(self, patient_data: PatientData, output_dir: str, global_dir: str):
         self.patient_data = patient_data
-        self.output_dir = output_dir
-        self.global_dir = global_dir
+        self.output_dir   = output_dir
+        self.global_dir   = global_dir
+
+        # — normalize EVERY input‐z once, up front —
+        self._normalize_all_contour_z()
+
         self._create_output_dir()
-        self.df_rest = pd.DataFrame()
+        self.df_rest   = pd.DataFrame()
         self.df_stress = pd.DataFrame()
+
+    def _normalize_all_contour_z(self) -> None:
+        """
+        For each of the four arrays in patient_data:
+          rest_contours_dia, rest_contours_sys,
+          stress_contours_dia, stress_contours_sys
+        subtract its own max-z and take abs, in place.
+        """
+        for attr in (
+            'rest_contours_dia',
+            'rest_contours_sys',
+            'stress_contours_dia',
+            'stress_contours_sys',
+        ):
+            arr = getattr(self.patient_data, attr, None)
+            if isinstance(arr, np.ndarray) and arr.shape[1] > 3:
+                z = arr[:, 3]
+                arr[:, 3] = np.abs(z - z.max())
+            else:
+                logger.warning(f"Cannot normalize z for `{attr}`: not found or wrong shape")
 
     def _create_output_dir(self) -> None:
         if not os.path.exists(self.output_dir):
@@ -28,290 +51,260 @@ class PatientStats:
             logger.info(f"Output directory already exists: {self.output_dir}")
 
     def process_case(self) -> None:
+        # 1) rest-vs-stress
         self.compute_lumen_changes()
         self.compute_sys_dia_properties(phase='rest')
         self.compute_sys_dia_properties(phase='stress')
-        (_, stress_short_dia, stress_short_sys) = self.compute_lumen_changes_diadia_syssys()
-        print(stress_short_dia, stress_short_sys)
-        self.compute_diadia_syssys_properties(stress_short_dia, stress_short_sys, phase='dia-dia')
-        self.compute_diadia_syssys_properties(stress_short_dia, stress_short_sys, phase='sys-sys')
-    
-    def _calculate_lumen_change(self, contours_dia, contours_sys, delta_pressure, delta_time=1, type='rest-stress') -> List[float]:
-        """Calculate lumen change for each contour using PCA."""
+
+        # 2) diadia / syssys
+        results, df_short_dia, df_short_sys = self.compute_lumen_changes_diadia_syssys()
+        self.compute_diadia_syssys_properties(df_short_dia, phase='dia-dia')
+        self.compute_diadia_syssys_properties(df_short_sys, phase='sys-sys')
+
+    def _calculate_lumen_change(
+        self,
+        contours_dia: np.ndarray,
+        contours_sys: np.ndarray,
+        delta_pressure: float,
+        delta_time: float = 1,
+        type: str = 'rest-stress'
+    ) -> List[float]:
         lumen_changes = []
-        
         if contours_dia is None or contours_sys is None:
             logger.warning("Contours data is missing.")
             return lumen_changes
 
-        # Extract unique contour IDs from both datasets
-        dia_ids = np.unique(contours_dia[:, 0])
-        sys_ids = np.unique(contours_sys[:, 0])
-
-        # Verify matching contour IDs
+        dia_ids = np.unique(contours_dia[:,0])
+        sys_ids = np.unique(contours_sys[:,0])
         if not np.array_equal(dia_ids, sys_ids):
             logger.error("Mismatch in contour IDs between diastole and systole")
             return lumen_changes
 
-        for contour_id in dia_ids:
-            # Extract points for this contour (excluding ID column)
-            dia_points = contours_dia[contours_dia[:, 0] == contour_id][:, 1:]
-            sys_points = contours_sys[contours_sys[:, 0] == contour_id][:, 1:]
-
-            # Verify point count (should be 501 points per contour)
-            if len(dia_points) != 501 or len(sys_points) != 501:
-                logger.warning(f"Contour {contour_id} has incorrect point count")
+        for cid in dia_ids:
+            d_pts = contours_dia [contours_dia [:,0]==cid][:,1:]
+            s_pts = contours_sys[contours_sys[:,0]==cid][:,1:]
+            if len(d_pts)!=501 or len(s_pts)!=501:
+                logger.warning(f"Contour {cid} has incorrect point count")
                 continue
 
-            # Calculate displacements (501 × 3 array)
-            displacements = sys_points - dia_points
-
-            # Perform PCA on the displacement vectors
+            disp = s_pts - d_pts
             try:
                 pca = PCA(n_components=3)
-                pca.fit(displacements)
-                total_variance = np.sum(pca.explained_variance_)
-                if type == 'rest-stress':
-                    lumen_change = total_variance / (delta_pressure * delta_time)
-                elif type == 'dia-dia' or type == 'sys-sys':
-                    lumen_change = total_variance / delta_pressure
-                else:
-                    logger.error(f"Invalid type: {type}. Use 'rest-stress', 'dia-dia', or 'sys-sys'.")
-                    lumen_change = np.nan
-                lumen_changes.append(lumen_change)
+                pca.fit(disp)
+                tot_var = pca.explained_variance_.sum()
+                if type=='rest-stress':
+                    change = tot_var/(delta_pressure*delta_time)
+                else:  # dia–dia or sys–sys
+                    change = tot_var/delta_pressure
+                lumen_changes.append(change)
             except Exception as e:
-                logger.error(f"PCA failed for contour {contour_id}: {str(e)}")
+                logger.error(f"PCA failed for contour {cid}: {e}")
                 lumen_changes.append(np.nan)
 
         return lumen_changes
 
-    def compute_lumen_changes(self):
-        """Main method to compute and save lumen changes for rest and stress."""
+    def compute_lumen_changes(self) -> Dict[str,List[float]]:
         results = {}
-        
-        # Process rest data
+        # rest
         if None not in self.patient_data.pressure_rest and None not in self.patient_data.time_rest:
-            delta_p_rest = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
-            delta_t_rest = self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
-            rest_changes = self._calculate_lumen_change(
+            dp = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
+            dt = self.patient_data.time_rest[1]     - self.patient_data.time_rest[0]
+            results['rest'] = self._calculate_lumen_change(
                 self.patient_data.rest_contours_dia,
                 self.patient_data.rest_contours_sys,
-                delta_p_rest,
-                delta_t_rest,
-                type='rest-stress'
+                dp, dt, type='rest-stress'
             )
-            results['rest'] = rest_changes
-        
-        # Process stress data
+        # stress
         if None not in self.patient_data.pressure_stress and None not in self.patient_data.time_stress:
-            delta_p_stress = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
-            delta_t_stress = self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
-            stress_changes = self._calculate_lumen_change(
+            dp = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
+            dt = self.patient_data.time_stress[1]     - self.patient_data.time_stress[0]
+            results['stress'] = self._calculate_lumen_change(
                 self.patient_data.stress_contours_dia,
                 self.patient_data.stress_contours_sys,
-                delta_p_stress,
-                delta_t_stress,
-                type='rest-stress'
+                dp, dt, type='rest-stress'
             )
-            results['stress'] = stress_changes
-        
-        # Create and save DataFrames
-        for condition in ['rest', 'stress']:
-            if condition in results:
-                df = pd.DataFrame({
-                    'contour_id': range(len(results[condition])),
-                    f'lumen_change_{condition}': results[condition]
-                })
-                output_path = os.path.join(self.output_dir, f'{condition}_lumen_changes.csv')
-                df.to_csv(output_path, index=False)
-                logger.info(f"Saved {condition} lumen changes to {output_path}")
 
+        for cond, changes in results.items():
+            df = pd.DataFrame({
+                'contour_id':           range(len(changes)),
+                f'lumen_change_{cond}': changes
+            })
+            path = os.path.join(self.output_dir, f'{cond}_lumen_changes.csv')
+            df.to_csv(path, index=False)
+            logger.info(f"Saved {cond} lumen changes to {path}")
         return results
 
-    def compute_sys_dia_properties(self, phase='rest'):
-        if phase == 'rest':
-            dia_prop = compute_contour_properties(self.patient_data.rest_contours_dia)
-            sys_prop = compute_contour_properties(self.patient_data.rest_contours_sys)
-            d_p = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
-            d_t = self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
-        elif phase == 'stress':
-            dia_prop = compute_contour_properties(self.patient_data.stress_contours_dia)
-            sys_prop = compute_contour_properties(self.patient_data.stress_contours_sys)
-            d_p = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
-            d_t = self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
+    def compute_sys_dia_properties(self, phase='rest') -> None:
+        if phase=='rest':
+            dia, sys = (self.patient_data.rest_contours_dia,
+                        self.patient_data.rest_contours_sys)
+            dp, dt   = (self.patient_data.pressure_rest[1]-self.patient_data.pressure_rest[0],
+                        self.patient_data.time_rest[1]    -self.patient_data.time_rest[0])
         else:
-            logger.error(f"Invalid phase: {phase}. Use 'rest' or 'stress'.")
-            return
+            dia, sys = (self.patient_data.stress_contours_dia,
+                        self.patient_data.stress_contours_sys)
+            dp, dt   = (self.patient_data.pressure_stress[1]-self.patient_data.pressure_stress[0],
+                        self.patient_data.time_stress[1]    -self.patient_data.time_stress[0])
 
+        p_dia = compute_contour_properties(dia)
+        p_sys = compute_contour_properties(sys)
+
+        # p_dia[:,1] is already normalized z
         df = pd.DataFrame({
-            'contour_id': dia_prop[:, 0].astype(int),
-            'z_value': dia_prop[:, 1],
-            'delta_lumen_area': (sys_prop[:, 2] - dia_prop[:, 2]) / (d_p * d_t),
-            'delta_min_dist': (sys_prop[:, 3] - dia_prop[:, 3]) / (d_p * d_t),
-            'delta_max_dist': (sys_prop[:, 4] - dia_prop[:, 4]) / (d_p * d_t),
-            'delta_elliptic_ratio': (sys_prop[:, 5] - dia_prop[:, 5]) / (d_p * d_t),
-            'lumen_area_dia': dia_prop[:, 2],
-            'lumen_area_sys': sys_prop[:, 2],
-            'min_dist_dia': dia_prop[:, 3],
-            'min_dist_sys': sys_prop[:, 3],
-            'max_dist_dia': dia_prop[:, 4],
-            'max_dist_sys': sys_prop[:, 4],
-            'elliptic_ratio_dia': dia_prop[:, 5],
-            'elliptic_ratio_sys': sys_prop[:, 5]
+            'contour_id':         p_dia[:,0].astype(int),
+            'z_value':            p_dia[:,1],
+            'delta_lumen_area':   (p_sys[:,2] - p_dia[:,2])/(dp*dt),
+            'delta_min_dist':     (p_sys[:,3] - p_dia[:,3])/(dp*dt),
+            'delta_max_dist':     (p_sys[:,4] - p_dia[:,4])/(dp*dt),
+            'delta_elliptic_ratio': (p_sys[:,5] - p_dia[:,5])/(dp*dt),
+            'lumen_area_dia':     p_dia[:,2],
+            'lumen_area_sys':     p_sys[:,2],
+            'min_dist_dia':       p_dia[:,3],
+            'min_dist_sys':       p_sys[:,3],
+            'max_dist_dia':       p_dia[:,4],
+            'max_dist_sys':       p_sys[:,4],
+            'elliptic_ratio_dia': p_dia[:,5],
+            'elliptic_ratio_sys': p_sys[:,5],
         })
-        df['z_value'] = df['z_value'].apply(lambda x: abs(x - df['z_value'].max()))
 
-        if phase == 'rest':
-            lumen_changes_path = os.path.join(self.output_dir, 'rest_lumen_changes.csv')
-        else:
-            lumen_changes_path = os.path.join(self.output_dir, 'stress_lumen_changes.csv')
-
-        if os.path.exists(lumen_changes_path):
-            lumen_df = pd.read_csv(lumen_changes_path)
-            df = df.merge(lumen_df, on='contour_id', how='left')
-            df.to_csv(lumen_changes_path, index=False)
-            if phase == 'rest':
+        in_path = os.path.join(self.output_dir, f'{phase}_lumen_changes.csv')
+        if os.path.exists(in_path):
+            lum = pd.read_csv(in_path)
+            df  = df.merge(lum, on='contour_id', how='left')
+            df.to_csv(in_path, index=False)
+            if phase=='rest':
                 self.df_rest = df
             else:
                 self.df_stress = df
         else:
-            logger.warning(f"Lumen changes file not found: {lumen_changes_path}")
+            logger.warning(f"Missing file: {in_path}")
 
-    def compute_lumen_changes_diadia_syssys(self) -> Tuple[Dict, pd.DataFrame, pd.DataFrame]:
-        """Main method to compute and save lumen changes for rest and stress."""
-        stress_shortened_dia = self.shorten_and_reindex(
+    def compute_lumen_changes_diadia_syssys(
+        self
+    ) -> Tuple[Dict[str,List[float]], pd.DataFrame, pd.DataFrame]:
+        short_dia = self.shorten_and_reindex(
             self.patient_data.rest_contours_dia,
-            self.patient_data.stress_contours_dia,
+            self.patient_data.stress_contours_dia
         )
-        stress_shortened_sys = self.shorten_and_reindex(
+        short_sys = self.shorten_and_reindex(
             self.patient_data.rest_contours_sys,
-            self.patient_data.stress_contours_sys,
+            self.patient_data.stress_contours_sys
         )
 
-        results = {}
-        
-        # Process rest data
-        if None not in self.patient_data.pressure_rest and None not in self.patient_data.pressure_stress:
-            delta_p_rest = self.patient_data.pressure_stress[0] - self.patient_data.pressure_rest[0]
-            rest_changes = self._calculate_lumen_change(
+        p_dia = compute_contour_properties(short_dia)
+        p_sys = compute_contour_properties(short_sys)
+
+        # p_dia[:,1] and p_sys[:,1] are already normalized z
+        df_short_dia = pd.DataFrame({
+            'contour_id':         p_dia[:,0].astype(int),
+            'z_value':            p_dia[:,1],
+            'lumen_area_dia':     p_dia[:,2],
+            'min_dist_dia':       p_dia[:,3],
+            'max_dist_dia':       p_dia[:,4],
+            'elliptic_ratio_dia': p_dia[:,5],
+        })
+        df_short_sys = pd.DataFrame({
+            'contour_id':         p_sys[:,0].astype(int),
+            'z_value':            p_sys[:,1],
+            'lumen_area_sys':     p_sys[:,2],
+            'min_dist_sys':       p_sys[:,3],
+            'max_dist_sys':       p_sys[:,4],
+            'elliptic_ratio_sys': p_sys[:,5],
+        })
+
+        dp_dia = (self.patient_data.pressure_stress[0]
+                  - self.patient_data.pressure_rest[0])
+        dp_sys = (self.patient_data.pressure_stress[1]
+                  - self.patient_data.pressure_rest[1])
+
+        results = {
+            'diadia': self._calculate_lumen_change(
                 self.patient_data.rest_contours_dia,
-                stress_shortened_dia,
-                delta_p_rest,
+                short_dia,
+                dp_dia,
                 type='dia-dia'
-            )
-            results['diadia'] = rest_changes
-        
-        # Process stress data
-        if None not in self.patient_data.pressure_rest and None not in self.patient_data.pressure_stress:
-            delta_p_stress = self.patient_data.pressure_stress[1] - self.patient_data.pressure_rest[1]
-            stress_changes = self._calculate_lumen_change(
+            ),
+            'syssys': self._calculate_lumen_change(
                 self.patient_data.rest_contours_sys,
-                stress_shortened_sys,
-                delta_p_stress,
+                short_sys,
+                dp_sys,
                 type='sys-sys'
             )
-            results['syssys'] = stress_changes
-        
-        # Create and save DataFrames
-        for condition in ['diadia', 'syssys']:
-            if condition in results:
-                df = pd.DataFrame({
-                    'contour_id': range(len(results[condition])),
-                    f'lumen_change_{condition}': results[condition]
-                })
-                output_path = os.path.join(self.output_dir, f'{condition}_lumen_changes.csv')
-                df.to_csv(output_path, index=False)
-                logger.info(f"Saved {condition} lumen changes to {output_path}")
-                cols = ['contour_id','x','y','z']
-        
-        stress_shortened_dia = pd.DataFrame(stress_shortened_dia, columns=cols)
-        stress_shortened_sys = pd.DataFrame(stress_shortened_sys, columns=cols)
+        }
 
-        return (results, stress_shortened_dia, stress_shortened_sys)
+        for cond, changes in results.items():
+            df = pd.DataFrame({
+                'contour_id':           range(len(changes)),
+                f'lumen_change_{cond}': changes
+            })
+            path = os.path.join(self.output_dir, f'{cond}_lumen_changes.csv')
+            df.to_csv(path, index=False)
+            logger.info(f"Saved {cond} lumen changes to {path}")
+
+        return results, df_short_dia, df_short_sys
 
     @staticmethod
-    def shorten_and_reindex(rest: np.ndarray, stress: np.ndarray, pts_per=501) -> np.ndarray:
-        # 1) mean‐z per contour
+    def shorten_and_reindex(rest: np.ndarray, stress: np.ndarray, pts_per: int = 501) -> np.ndarray:
         def mean_z(arr):
             ids = np.unique(arr[:,0])
-            return {i: arr[arr[:,0]==i, 3].mean() for i in ids}
+            return {i: arr[arr[:,0]==i,3].mean() for i in ids}
 
         rest_z   = mean_z(rest)
         stress_z = mean_z(stress)
+        ostium   = max(stress_z.keys())
 
-        # 2) find ostium in stress
-        stress_ids = sorted(stress_z.keys())
-        ostium_id  = stress_ids[-1]
-
-        # 3) match each rest contour→closest stress z (excluding ostium)
         matched = {}
         for rid, rz in rest_z.items():
             if rid == max(rest_z):
                 continue
-            candidates = {sid: abs(sz - rz)
-                        for sid, sz in stress_z.items()
-                        if sid != ostium_id}
+            candidates = {sid: abs(sz - rz) for sid,sz in stress_z.items() if sid != ostium}
             matched[rid] = min(candidates, key=candidates.get)
 
-        # 4) select those + ostium
-        sel_ids = list(matched.values()) + [ostium_id]
-        short   = stress[np.isin(stress[:,0], sel_ids)]
+        sel = list(matched.values()) + [ostium]
+        short = stress[np.isin(stress[:,0], sel)]
 
-        # 5) re‐index
-        new_idx_map = {sid: i for i, sid in enumerate(matched.values())}
-        new_idx_map[ostium_id] = len(matched)
-        # vectorize mapping
-        mapper = np.vectorize(lambda old: new_idx_map[int(old)])
+        new_map = {sid:i for i,sid in enumerate(matched.values())}
+        new_map[ostium] = len(matched)
+        mapper = np.vectorize(lambda old:new_map[int(old)])
         short[:,0] = mapper(short[:,0]).astype(int)
-
         return short
 
-    def compute_diadia_syssys_properties(self, stress_shortened_dia, stress_shortened_sys, phase='dia-dia'):
-        if phase == 'dia-dia':
-            prop_rest = self.df_rest[['contour_id', 'z_value', 'lumen_area_dia', 'min_dist_dia', 'max_dist_dia', 'elliptic_ratio_dia']].values
-            prop_stress = stress_shortened_dia[['contour_id', 'z_value', 'lumen_area_dia', 'min_dist_dia', 'max_dist_dia', 'elliptic_ratio_dia']].values
-            d_p = self.patient_data.pressure_stress[0] - self.patient_data.pressure_rest[0]
-        elif phase == 'sys-sys':
-            prop_rest = self.df_rest[['contour_id', 'z_value', 'lumen_area_sys', 'min_dist_sys', 'max_dist_sys', 'elliptic_ratio_sys']].values
-            prop_stress = stress_shortened_sys[['contour_id', 'z_value', 'lumen_area_sys', 'min_dist_sys', 'max_dist_sys', 'elliptic_ratio_sys']].values
-            d_p = self.patient_data.pressure_stress[1] - self.patient_data.pressure_rest[1]
+    def compute_diadia_syssys_properties(
+        self,
+        df_short: pd.DataFrame,
+        phase: str = 'dia-dia'
+    ) -> None:
+        if phase=='dia-dia':
+            cols = ['lumen_area_dia','min_dist_dia','max_dist_dia','elliptic_ratio_dia']
+            dp   = (self.patient_data.pressure_stress[0]
+                    - self.patient_data.pressure_rest[0])
         else:
-            logger.error(f"Invalid phase: {phase}. Use 'dia-dia' or 'sys-sys'.")
-            return
+            cols = ['lumen_area_sys','min_dist_sys','max_dist_sys','elliptic_ratio_sys']
+            dp   = (self.patient_data.pressure_stress[1]
+                    - self.patient_data.pressure_rest[1])
 
-        df = pd.DataFrame({
-            'contour_id': prop_rest[:, 0].astype(int),
-            'z_value': prop_rest[:, 1],
-            'delta_lumen_area': (prop_stress[:, 2] - prop_rest[:, 2]) / d_p,
-            'delta_min_dist': (prop_stress[:, 3] - prop_rest[:, 3]) / d_p,
-            'delta_max_dist': (prop_stress[:, 4] - prop_rest[:, 4]) / d_p,
-            'delta_elliptic_ratio': (prop_stress[:, 5] - prop_rest[:, 5]) / d_p,
-            'lumen_area_dia': prop_rest[:, 2],
-            'lumen_area_sys': prop_stress[:, 2],
-            'min_dist_dia': prop_rest[:, 3],
-            'min_dist_sys': prop_stress[:, 3],
-            'max_dist_dia': prop_rest[:, 4],
-            'max_dist_sys': prop_stress[:, 4],
-            'elliptic_ratio_dia': prop_rest[:, 5],
-            'elliptic_ratio_sys': prop_stress[:, 5]
-        })
-        df['z_value'] = df['z_value'].apply(lambda x: abs(x - df['z_value'].max()))
+        rest_df = self.df_rest[['contour_id','z_value'] + cols].copy()
+        rest_df.rename(columns={c:f"{c}_rest" for c in cols}, inplace=True)
 
-        if phase == 'rest':
-            lumen_changes_path = os.path.join(self.output_dir, 'rest_lumen_changes.csv')
-        else:
-            lumen_changes_path = os.path.join(self.output_dir, 'stress_lumen_changes.csv')
+        stress_df = df_short[['contour_id','z_value'] + cols].copy()
+        stress_df.rename(columns={c:f"{c}_stress" for c in cols}, inplace=True)
 
-        if os.path.exists(lumen_changes_path):
-            lumen_df = pd.read_csv(lumen_changes_path)
-            df = df.merge(lumen_df, on='contour_id', how='left')
-            df.to_csv(lumen_changes_path, index=False)
-            if phase == 'rest':
-                self.df_rest = df
-            else:
-                self.df_stress = df
-        else:
-            logger.warning(f"Lumen changes file not found: {lumen_changes_path}")
+        merged = rest_df.merge(stress_df, on='contour_id')
+        base   = phase.split('-')[0]  # 'dia' or 'sys'
+
+        merged['delta_lumen_area']     = (merged[f'lumen_area_{base}_stress']
+                                         - merged[f'lumen_area_{base}_rest']) / dp
+        merged['delta_min_dist']       = (merged[f'min_dist_{base}_stress']
+                                         - merged[f'min_dist_{base}_rest']) / dp
+        merged['delta_max_dist']       = (merged[f'max_dist_{base}_stress']
+                                         - merged[f'max_dist_{base}_rest']) / dp
+        merged['delta_elliptic_ratio'] = (merged[f'elliptic_ratio_{base}_stress']
+                                         - merged[f'elliptic_ratio_{base}_rest']) / dp
+
+        tag  = 'diadia' if phase=='dia-dia' else 'syssys'
+        path = os.path.join(self.output_dir, f'{tag}_lumen_changes.csv')
+        merged.to_csv(path, index=False)
+        logger.info(f"Saved {tag} properties to {path}")
 
     def save_selected_to_global_stats(self):
         pass
