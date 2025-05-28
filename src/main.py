@@ -13,17 +13,17 @@ GLOBAL_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/da
 PATIENT_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data_eacvi/output/patient_stats"
 
 def main():
-    global_data = GlobalData(GLOBAL_PATH)
-    glob_df, ids = global_data.create_global_df()
-    logger.info(f"Loaded Global Data")
+    # global_data = GlobalData(GLOBAL_PATH)
+    # glob_df, ids = global_data.create_global_df()
+    # logger.info(f"Loaded Global Data")
     
-    global_stats = GlobalStats(glob_df, GLOBAL_OUTPUT)
-    # Plot default (rest & dobu) pressure metrics
-    global_stats.global_stats()
+    # global_stats = GlobalStats(glob_df, GLOBAL_OUTPUT)
+    # # Plot default (rest & dobu) pressure metrics
+    # global_stats.global_stats()
 
-    # Plot only rest vs dobu for lumen metrics
-    global_stats.plot_global_change(mode="lumen")
-    global_stats.plot_global_change(mode="mln")
+    # # Plot only rest vs dobu for lumen metrics
+    # global_stats.plot_global_change(mode="lumen")
+    # global_stats.plot_global_change(mode="mln")
 
     ids = ['narco_119', 'narco_122', 'narco_216', 'narco_218', 'narco_234']
     for id in ids:

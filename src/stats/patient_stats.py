@@ -195,17 +195,17 @@ class PatientStats:
     def compute_lumen_changes_diadia_syssys(
         self
     ) -> Tuple[Dict[str,List[float]], pd.DataFrame, pd.DataFrame]:
-        short_dia = self.shorten_and_reindex(
+        short_dia_rest, short_dia_stress = self.shorten_and_reindex(
             self.patient_data.rest_contours_dia,
             self.patient_data.stress_contours_dia
         )
-        short_sys = self.shorten_and_reindex(
+        short_sys_rest, short_sys_stress = self.shorten_and_reindex(
             self.patient_data.rest_contours_sys,
             self.patient_data.stress_contours_sys
         )
 
-        p_dia = compute_contour_properties(short_dia)
-        p_sys = compute_contour_properties(short_sys)
+        p_dia = compute_contour_properties(short_dia_stress)
+        p_sys = compute_contour_properties(short_sys_stress)
 
         # p_dia[:,1] and p_sys[:,1] are already normalized z
         df_short_dia = pd.DataFrame({
@@ -232,18 +232,19 @@ class PatientStats:
 
         results = {
             'diadia': self._calculate_lumen_change(
-                self.patient_data.rest_contours_dia,
-                short_dia,
+                short_dia_rest,
+                short_dia_stress,
                 dp_dia,
                 type='dia-dia'
             ),
             'syssys': self._calculate_lumen_change(
-                self.patient_data.rest_contours_sys,
-                short_sys,
+                short_sys_rest,
+                short_sys_stress,
                 dp_sys,
                 type='sys-sys'
             )
         }
+
         
         for cond, changes in results.items():
             df = pd.DataFrame({
@@ -257,7 +258,7 @@ class PatientStats:
         return results, df_short_dia, df_short_sys
 
     @staticmethod
-    def shorten_and_reindex(rest: np.ndarray, stress: np.ndarray, pts_per: int = 501) -> np.ndarray:
+    def shorten_and_reindex(rest: np.ndarray, stress: np.ndarray, pts_per: int = 501) -> Tuple[np.ndarray, np.ndarray]:
         def mean_z(arr):
             ids = np.unique(arr[:,0])
             return {i: arr[arr[:,0]==i,3].mean() for i in ids}
@@ -281,15 +282,16 @@ class PatientStats:
         mapper = np.vectorize(lambda old:new_map[int(old)])
         short[:,0] = mapper(short[:,0]).astype(int)
         
-        print("------Debugging shorten_and_reindex--------")
         # shorten the longer array by removing frames from the beginning
         # so that both arrays have the same number of unique contour_ids
         rest_ids = np.unique(rest[:, 0])
         short_ids = np.unique(short[:, 0])
         n_rest = len(rest_ids)
         n_short = len(short_ids)
-        print(rest_ids)
-        print(short_ids)
+
+        rest_new = None
+        stress_new = None
+
         if n_short > n_rest:
             # Remove frames from the beginning of short to match rest
             ids_to_keep = short_ids[-n_rest:]
@@ -297,16 +299,24 @@ class PatientStats:
             # Reindex contour_id to 0...n_rest-1
             new_map = {old: i for i, old in enumerate(sorted(ids_to_keep))}
             short[:, 0] = np.vectorize(lambda x: new_map[int(x)])(short[:, 0])
+            rest[:, 0] = np.vectorize(lambda x: new_map[int(x)])(rest[:, 0])
+            rest_new = rest
+            stress_new = short
         elif n_rest > n_short:
             # Remove frames from the beginning of rest to match short
             ids_to_keep = rest_ids[-n_short:]
             rest = rest[np.isin(rest[:, 0], ids_to_keep)]
             # Reindex contour_id to 0...n_short-1
             new_map = {old: i for i, old in enumerate(sorted(ids_to_keep))}
+            short[:, 0] = np.vectorize(lambda x: new_map[int(x)])(short[:, 0])
             rest[:, 0] = np.vectorize(lambda x: new_map[int(x)])(rest[:, 0])
-        print(rest.shape)
-        print(short.shape)
-        return short
+            rest_new = rest
+            stress_new = short
+        else:
+            rest_new = rest
+            stress_new = short
+
+        return (rest_new, stress_new)
 
     def compute_diadia_syssys_properties(
         self,
@@ -377,10 +387,15 @@ class PatientStats:
 
         # 2) Find first-hit indices for elliptic_ratio >= 1.3 in each phase
         im_pos_rest   = None
+
         d_rest = first_hit(self.df_rest, 'elliptic_ratio_dia', 'rest-dia')
         s_rest = first_hit(self.df_rest, 'elliptic_ratio_sys', 'rest-sys')
         if d_rest is not None and s_rest is not None:
             im_pos_rest = (d_rest + s_rest) // 2
+        elif d_rest is not None and s_rest is None:
+            im_pos_rest = d_rest
+        elif d_rest is None and s_rest is not None:
+            im_pos_rest = s_rest
         else:
             return
 
@@ -389,6 +404,10 @@ class PatientStats:
         s_str = first_hit(self.df_stress, 'elliptic_ratio_sys', 'stress-sys')
         if d_str is not None and s_str is not None:
             im_pos_stress = (d_str + s_str) // 2
+        elif d_str is not None and s_str is None:
+            im_pos_stress = d_str
+        elif d_str is None and s_str is not None:
+            im_pos_stress = s_str
         else:
             return
 
@@ -397,6 +416,10 @@ class PatientStats:
         s_dia = first_hit(self.df_dia, 'elliptic_ratio_dia_stress', 'dia-stress')
         if d_dia is not None and s_dia is not None:
             im_pos_dia = (d_dia + s_dia) // 2
+        elif d_dia is not None and s_dia is None:
+            im_pos_dia = d_dia
+        elif d_dia is None and s_dia is not None:
+            im_pos_dia = s_dia
         else:
             return
 
@@ -405,6 +428,10 @@ class PatientStats:
         s_sys = first_hit(self.df_sys, 'elliptic_ratio_sys_stress', 'sys-stress')
         if d_sys is not None and s_sys is not None:
             im_pos_sys = (d_sys + s_sys) // 2
+        elif d_sys is not None and s_sys is None:
+            im_pos_sys = d_sys
+        elif d_sys is None and s_sys is not None:
+            im_pos_sys = s_sys
         else:
             return
 
