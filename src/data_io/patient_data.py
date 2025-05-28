@@ -53,7 +53,7 @@ class LoadIndividualData:
         self.process_pressure()
         self.load_obj_data()
         self.load_loess_data()
-        logger.info(f"Loaded PatientData for {self.id}: {self.patient_data}")
+        logger.info(f"Loaded PatientData for {self.id}")
         return self.patient_data
         
     def find_dirs(self) -> Tuple[Path, Path]:
