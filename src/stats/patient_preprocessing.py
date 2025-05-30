@@ -90,7 +90,7 @@ class PatientStats:
             results["stress"] = df
 
         for cond, df in results.items():
-            df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
+            # df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
             path = os.path.join(self.output_dir, f"{cond}_lumen_changes.csv")
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
@@ -294,7 +294,7 @@ class PatientStats:
         }
 
         for cond, df in results.items():
-            df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
+            # df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
             path = os.path.join(self.output_dir, f'{cond}_lumen_changes.csv')
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
@@ -406,6 +406,13 @@ class PatientStats:
         logger.info(f"Saved {tag} properties to {path}")
 
     def save_selected_to_global_stats(self):
+        """ Extensive summary functions for patients individual stats into a global dataframe.
+            Column definition are explicit, allows for easy updates.
+            Input:
+            - self.df_rest, self.df_stress, self.df_dia, self.df_sys
+        - Output:
+            - DataFrame with selected statistics, saved to global stats directory.
+        """
         # Helper to find first hit >= threshold, returns positional index or None
         def first_hit(df, col, phase_desc):
             hits = df.index[df[col] >= 1.3]
@@ -487,6 +494,67 @@ class PatientStats:
 
         # 4) Compute mean
         im_len = (im_len_rest + im_len_stress + im_len_dia + im_len_sys) / 4
+        
+        # needed for sectionwise
+        im_20_per = im_len * 0.2
+        n_intramural = round(im_len / im_20_per)
+        n_segments = n_intramural + 3 # number of segments for extramural, 3 based on data
+        print(f"patient {self.patient_data.id} with intramural length {im_len} has {n_intramural} intramural segments, {n_segments} total segments")
+
+        section_stats = {}
+        for phase, df in (
+            ('pulsatile_rest', self.df_rest),
+            ('pulsatile_stress', self.df_stress),
+            ('stressind_dia', self.df_dia),
+            ('stressind_sys', self.df_sys)
+        ):
+            for i in range(n_segments):
+                z0 = i * im_20_per
+                z1 = (i+1) * im_20_per
+                if 'z_value' in df.columns:
+                    sel = df[(df['z_value'] >= z0) & (df['z_value'] < z1)]
+                else:
+                    sel = df[(df['z_value_y'] >= z0) & (df['z_value_y'] < z1)]
+                if sel.empty:
+                    mean_lumen = np.nan
+                    mean_min_dist = np.nan
+                    mean_elliptic_ratio = np.nan
+                    mean_pca_glob = np.nan
+                    mean_pca_aniso = np.nan
+                    mean_pca_ratio = np.nan
+                    mean_pca_pc1_var = np.nan
+                    mean_pca_pc2_var = np.nan
+                    mean_pca_pc1_dir_x = np.nan
+                    mean_pca_pc1_dir_y = np.nan
+                    mean_pca_pc2_dir_x = np.nan
+                    mean_pca_pc2_dir_y = np.nan
+                else:
+                    mean_lumen = sel['delta_lumen_area'].mean()
+                    mean_min_dist = sel['delta_min_dist'].mean()
+                    mean_elliptic_ratio = sel['delta_elliptic_ratio'].mean()
+                    mean_pca_glob = sel['lumen_change'].mean()
+                    mean_pca_aniso = sel['anisotropy_index'].mean()
+                    mean_pca_ratio = sel['pc_ratio'].mean()
+                    mean_pca_pc1_var = sel['pc1_var'].mean()
+                    mean_pca_pc2_var = sel['pc2_var'].mean()
+                    mean_pca_pc1_dir_x = sel['pc1_dir_x'].mean()
+                    mean_pca_pc1_dir_y = sel['pc1_dir_y'].mean()
+                    mean_pca_pc2_dir_x = sel['pc2_dir_x'].mean()
+                    mean_pca_pc2_dir_y = sel['pc2_dir_y'].mean()
+                pct_label = (i+1) * 20
+                section_stats[f'{phase}_pct_{pct_label}_lumen'] = mean_lumen
+                section_stats[f'{phase}_pct_{pct_label}_min_dist'] = mean_min_dist
+                section_stats[f'{phase}_pct_{pct_label}_ellip_ratio'] = mean_elliptic_ratio
+                section_stats[f'{phase}_pct_{pct_label}_pca_glob'] = mean_pca_glob
+                section_stats[f'{phase}_pct_{pct_label}_pca_aniso'] = mean_pca_aniso
+                section_stats[f'{phase}_pct_{pct_label}_pca_ratio'] = mean_pca_ratio
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc1_var'] = mean_pca_pc1_var
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc2_var'] = mean_pca_pc2_var
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc1_dir_x'] = mean_pca_pc1_dir_x
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc1_dir_y'] = mean_pca_pc1_dir_y
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc2_dir_x'] = mean_pca_pc2_dir_x
+                section_stats[f'{phase}_pct_{pct_label}_pca_pc2_dir_y'] = mean_pca_pc2_dir_y
+
 
         # 5) Compute MLA positions, clamped
         def clamp(idx, df):
@@ -498,48 +566,122 @@ class PatientStats:
         mla_pos_sys    = clamp((ost_pos_sys    - im_pos_sys)    // 2, self.df_sys)
 
         # 6) Build the single-row DataFrame
-        df_out = pd.DataFrame({
+        data = {
             'patient_id': [self.patient_data.id],
             'mean_intramural_length': [im_len],
+            'pressure_change_pulsatile_rest': [self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]],
+            'time_change_pulsatile_rest': [self.patient_data.time_rest[1] - self.patient_data.time_rest[0]],
+            'pressure_change_pulsatile_stress': [self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]],
+            'time_change_pulsatile_stress': [self.patient_data.time_stress[1] - self.patient_data.time_stress[0]],
+            'pressure_change_stressind_dia': [self.patient_data.pressure_stress[0] - self.patient_data.pressure_rest[0]],
+            'pressure_change_stressind_sys': [self.patient_data.pressure_stress[1] - self.patient_data.pressure_rest[1]],
 
             'pulsatile_rest_lumen_ost':   self.df_rest.iloc[ost_pos_rest]['delta_lumen_area'],
             'pulsatile_rest_min_ost':     self.df_rest.iloc[ost_pos_rest]['delta_min_dist'],
             'pulsatile_rest_ellip_ost':   self.df_rest.iloc[ost_pos_rest]['delta_elliptic_ratio'],
-            'pulsatile_rest_pca_ost':     self.df_rest.iloc[ost_pos_rest]['lumen_change_rest'],
+            'pulsatile_rest_pca_glob_ost':     self.df_rest.iloc[ost_pos_rest]['lumen_change'],
+            'pulsatile_rest_pca_aniso_ost': self.df_rest.iloc[ost_pos_rest]['anisotropy_index'],
+            'pulsatile_rest_pca_ratio_ost': self.df_rest.iloc[ost_pos_rest]['pc_ratio'],
+            'pulsatile_rest_pca_pc1_var_ost': self.df_rest.iloc[ost_pos_rest]['pc1_var'],
+            'pulsatile_rest_pca_pc2_var_ost': self.df_rest.iloc[ost_pos_rest]['pc2_var'],
+            'pulsatile_rest_pca_pc1_dir_x_ost': self.df_rest.iloc[ost_pos_rest]['pc1_dir_x'],
+            'pulsatile_rest_pca_pc1_dir_y_ost': self.df_rest.iloc[ost_pos_rest]['pc1_dir_y'],
+            'pulsatile_rest_pca_pc2_dir_x_ost': self.df_rest.iloc[ost_pos_rest]['pc2_dir_x'],
+            'pulsatile_rest_pca_pc2_dir_y_ost': self.df_rest.iloc[ost_pos_rest]['pc2_dir_y'],
             'pulsatile_rest_lumen_mla':   self.df_rest.iloc[mla_pos_rest]['delta_lumen_area'],
             'pulsatile_rest_min_mla':     self.df_rest.iloc[mla_pos_rest]['delta_min_dist'],
             'pulsatile_rest_ellip_mla':   self.df_rest.iloc[mla_pos_rest]['delta_elliptic_ratio'],
-            'pulsatile_rest_pca_mla':     self.df_rest.iloc[mla_pos_rest]['lumen_change_rest'],
+            'pulsatile_rest_pca_glob_mla':     self.df_rest.iloc[mla_pos_rest]['lumen_change'],
+            'pulsatile_rest_pca_aniso_mla': self.df_rest.iloc[mla_pos_rest]['anisotropy_index'],
+            'pulsatile_rest_pca_ratio_mla': self.df_rest.iloc[mla_pos_rest]['pc_ratio'],
+            'pulsatile_rest_pca_pc1_var_mla': self.df_rest.iloc[mla_pos_rest]['pc1_var'],
+            'pulsatile_rest_pca_pc2_var_mla': self.df_rest.iloc[mla_pos_rest]['pc2_var'],
+            'pulsatile_rest_pca_pc1_dir_x_mla': self.df_rest.iloc[mla_pos_rest]['pc1_dir_x'],
+            'pulsatile_rest_pca_pc1_dir_y_mla': self.df_rest.iloc[mla_pos_rest]['pc1_dir_y'],
+            'pulsatile_rest_pca_pc2_dir_x_mla': self.df_rest.iloc[mla_pos_rest]['pc2_dir_x'],
+            'pulsatile_rest_pca_pc2_dir_y_mla': self.df_rest.iloc[mla_pos_rest]['pc2_dir_y'],
 
             'pulsatile_stress_lumen_ost':   self.df_stress.iloc[ost_pos_stress]['delta_lumen_area'],
             'pulsatile_stress_min_ost':     self.df_stress.iloc[ost_pos_stress]['delta_min_dist'],
             'pulsatile_stress_ellip_ost':   self.df_stress.iloc[ost_pos_stress]['delta_elliptic_ratio'],
-            'pulsatile_stress_pca_ost':     self.df_stress.iloc[ost_pos_stress]['lumen_change_stress'],
+            'pulsatile_stress_pca_glob_ost':     self.df_stress.iloc[ost_pos_stress]['lumen_change'],
+            'pulsatile_stress_pca_aniso_ost': self.df_stress.iloc[ost_pos_stress]['anisotropy_index'],
+            'pulsatile_stress_pca_ratio_ost': self.df_stress.iloc[ost_pos_stress]['pc_ratio'],
+            'pulsatile_stress_pca_pc1_var_ost': self.df_stress.iloc[ost_pos_stress]['pc1_var'],
+            'pulsatile_stress_pca_pc2_var_ost': self.df_stress.iloc[ost_pos_stress]['pc2_var'],
+            'pulsatile_stress_pca_pc1_dir_x_ost': self.df_stress.iloc[ost_pos_stress]['pc1_dir_x'],
+            'pulsatile_stress_pca_pc1_dir_y_ost': self.df_stress.iloc[ost_pos_stress]['pc1_dir_y'],
+            'pulsatile_stress_pca_pc2_dir_x_ost': self.df_stress.iloc[ost_pos_stress]['pc2_dir_x'],
+            'pulsatile_stress_pca_pc2_dir_y_ost': self.df_stress.iloc[ost_pos_stress]['pc2_dir_y'],
             'pulsatile_stress_lumen_mla':   self.df_stress.iloc[mla_pos_stress]['delta_lumen_area'],
             'pulsatile_stress_min_mla':     self.df_stress.iloc[mla_pos_stress]['delta_min_dist'],
             'pulsatile_stress_ellip_mla':   self.df_stress.iloc[mla_pos_stress]['delta_elliptic_ratio'],
-            'pulsatile_stress_pca_mla':     self.df_stress.iloc[mla_pos_stress]['lumen_change_stress'],
+            'pulsatile_stress_pca_glob_mla':     self.df_stress.iloc[mla_pos_stress]['lumen_change'],
+            'pulsatile_stress_pca_aniso_mla': self.df_stress.iloc[mla_pos_stress]['anisotropy_index'],
+            'pulsatile_stress_pca_ratio_mla': self.df_stress.iloc[mla_pos_stress]['pc_ratio'],
+            'pulsatile_stress_pca_pc1_var_mla': self.df_stress.iloc[mla_pos_stress]['pc1_var'],
+            'pulsatile_stress_pca_pc2_var_mla': self.df_stress.iloc[mla_pos_stress]['pc2_var'],
+            'pulsatile_stress_pca_pc1_dir_x_mla': self.df_stress.iloc[mla_pos_stress]['pc1_dir_x'],
+            'pulsatile_stress_pca_pc1_dir_y_mla': self.df_stress.iloc[mla_pos_stress]['pc1_dir_y'],
+            'pulsatile_stress_pca_pc2_dir_x_mla': self.df_stress.iloc[mla_pos_stress]['pc2_dir_x'],
+            'pulsatile_stress_pca_pc2_dir_y_mla': self.df_stress.iloc[mla_pos_stress]['pc2_dir_y'],
 
             'stressind_dia_lumen_ost':   self.df_dia.iloc[ost_pos_dia]['delta_lumen_area'],
             'stressind_dia_min_ost':     self.df_dia.iloc[ost_pos_dia]['delta_min_dist'],
             'stressind_dia_ellip_ost':   self.df_dia.iloc[ost_pos_dia]['delta_elliptic_ratio'],
-            'stressind_dia_pca_ost':     self.df_dia.iloc[ost_pos_dia]['lumen_change_diadia'],
+            'stressind_dia_pca_glob_ost':     self.df_dia.iloc[ost_pos_dia]['lumen_change'],
+            'stressind_dia_pca_aniso_ost': self.df_dia.iloc[ost_pos_dia]['anisotropy_index'],
+            'stressind_dia_pca_ratio_ost': self.df_dia.iloc[ost_pos_dia]['pc_ratio'],
+            'stressind_dia_pca_pc1_var_ost': self.df_dia.iloc[ost_pos_dia]['pc1_var'],
+            'stressind_dia_pca_pc2_var_ost': self.df_dia.iloc[ost_pos_dia]['pc2_var'],
+            'stressind_dia_pca_pc1_dir_x_ost': self.df_dia.iloc[ost_pos_dia]['pc1_dir_x'],
+            'stressind_dia_pca_pc1_dir_y_ost': self.df_dia.iloc[ost_pos_dia]['pc1_dir_y'],
+            'stressind_dia_pca_pc2_dir_x_ost': self.df_dia.iloc[ost_pos_dia]['pc2_dir_x'],
+            'stressind_dia_pca_pc2_dir_y_ost': self.df_dia.iloc[ost_pos_dia]['pc2_dir_y'],
             'stressind_dia_lumen_mla':   self.df_dia.iloc[mla_pos_dia]['delta_lumen_area'],
             'stressind_dia_min_mla':     self.df_dia.iloc[mla_pos_dia]['delta_min_dist'],
             'stressind_dia_ellip_mla':   self.df_dia.iloc[mla_pos_dia]['delta_elliptic_ratio'],
-            'stressind_dia_pca_mla':     self.df_dia.iloc[mla_pos_dia]['lumen_change_diadia'],
+            'stressind_dia_pca_glob_mla':     self.df_dia.iloc[mla_pos_dia]['lumen_change'],
+            'stressind_dia_pca_aniso_mla': self.df_dia.iloc[mla_pos_dia]['anisotropy_index'],
+            'stressind_dia_pca_ratio_mla': self.df_dia.iloc[mla_pos_dia]['pc_ratio'],
+            'stressind_dia_pca_pc1_var_mla': self.df_dia.iloc[mla_pos_dia]['pc1_var'],
+            'stressind_dia_pca_pc2_var_mla': self.df_dia.iloc[mla_pos_dia]['pc2_var'],
+            'stressind_dia_pca_pc1_dir_x_mla': self.df_dia.iloc[mla_pos_dia]['pc1_dir_x'],
+            'stressind_dia_pca_pc1_dir_y_mla': self.df_dia.iloc[mla_pos_dia]['pc1_dir_y'],
+            'stressind_dia_pca_pc2_dir_x_mla': self.df_dia.iloc[mla_pos_dia]['pc2_dir_x'],
 
             'stressind_sys_lumen_ost':   self.df_sys.iloc[ost_pos_sys]['delta_lumen_area'],
             'stressind_sys_min_ost':     self.df_sys.iloc[ost_pos_sys]['delta_min_dist'],
             'stressind_sys_ellip_ost':   self.df_sys.iloc[ost_pos_sys]['delta_elliptic_ratio'],
-            'stressind_sys_pca_ost':     self.df_sys.iloc[ost_pos_sys]['lumen_change_syssys'],
+            'stressind_sys_pca_glob_ost':     self.df_sys.iloc[ost_pos_sys]['lumen_change'],
+            'stressind_sys_pca_aniso_ost': self.df_sys.iloc[ost_pos_sys]['anisotropy_index'],
+            'stressind_sys_pca_ratio_ost': self.df_sys.iloc[ost_pos_sys]['pc_ratio'],
+            'stressind_sys_pca_pc1_var_ost': self.df_sys.iloc[ost_pos_sys]['pc1_var'],
+            'stressind_sys_pca_pc2_var_ost': self.df_sys.iloc[ost_pos_sys]['pc2_var'],
+            'stressind_sys_pca_pc1_dir_x_ost': self.df_sys.iloc[ost_pos_sys]['pc1_dir_x'],
+            'stressind_sys_pca_pc1_dir_y_ost': self.df_sys.iloc[ost_pos_sys]['pc1_dir_y'],
+            'stressind_sys_pca_pc2_dir_x_ost': self.df_sys.iloc[ost_pos_sys]['pc2_dir_x'],
+            'stressind_sys_pca_pc2_dir_y_ost': self.df_sys.iloc[ost_pos_sys]['pc2_dir_y'],
             'stressind_sys_lumen_mla':   self.df_sys.iloc[mla_pos_sys]['delta_lumen_area'],
             'stressind_sys_min_mla':     self.df_sys.iloc[mla_pos_sys]['delta_min_dist'],
             'stressind_sys_ellip_mla':   self.df_sys.iloc[mla_pos_sys]['delta_elliptic_ratio'],
-            'stressind_sys_pca_mla':     self.df_sys.iloc[mla_pos_sys]['lumen_change_syssys'],
-        })
+            'stressind_sys_pca_glob_mla':     self.df_sys.iloc[mla_pos_sys]['lumen_change'],
+            'stressind_sys_pca_aniso_mla': self.df_sys.iloc[mla_pos_sys]['anisotropy_index'],
+            'stressind_sys_pca_ratio_mla': self.df_sys.iloc[mla_pos_sys]['pc_ratio'],
+            'stressind_sys_pca_pc1_var_mla': self.df_sys.iloc[mla_pos_sys]['pc1_var'],
+            'stressind_sys_pca_pc2_var_mla': self.df_sys.iloc[mla_pos_sys]['pc2_var'],
+            'stressind_sys_pca_pc1_dir_x_mla': self.df_sys.iloc[mla_pos_sys]['pc1_dir_x'],
+            'stressind_sys_pca_pc1_dir_y_mla': self.df_sys.iloc[mla_pos_sys]['pc1_dir_y'],
+            'stressind_sys_pca_pc2_dir_x_mla': self.df_sys.iloc[mla_pos_sys]['pc2_dir_x'],
+            'stressind_sys_pca_pc2_dir_y_mla': self.df_sys.iloc[mla_pos_sys]['pc2_dir_y'],
+        }
 
-        # 7) Append or write out
+        # 7) Add section stats to the output DataFrame
+        for key, value in section_stats.items():
+            data[key] = value
+        df_out = pd.DataFrame(data)
+
+        # 8) Append or write out
         global_stats_path = os.path.join(self.global_dir, 'local_patient_stats.csv')
         if os.path.exists(global_stats_path):
             df_existing = pd.read_csv(global_stats_path)
@@ -551,160 +693,3 @@ class PatientStats:
 
         logger.info(f"Saved patient stats to {global_stats_path}")
 
-    # def save_selected_to_global_stats(self):
-    #     ost_idx_rest = self.df_rest['contour_id'].max()
-    #     ost_idx_stress = self.df_stress['contour_id'].max()
-    #     ost_idx_dia = self.df_dia['contour_id'].max()
-    #     ost_idx_sys = self.df_sys['contour_id'].max()
-
-    #     # Find first index with elliptic_ratio_dia >= 1.3 in self.df_rest
-    #     idx_dia = self.df_rest[self.df_rest['elliptic_ratio_dia'] >= 1.3].index
-    #     idx_sys = self.df_rest[self.df_rest['elliptic_ratio_sys'] >= 1.3].index
-    #     im_idx_rest = (idx_dia[0] + idx_sys[0]) // 2
-    #     im_len_rest = self.df_rest.loc[self.df_rest.index[im_idx_rest], 'z_value']
-    #     idx_dia = self.df_stress[self.df_stress['elliptic_ratio_dia'] >= 1.3].index
-    #     idx_sys = self.df_stress[self.df_stress['elliptic_ratio_sys'] >= 1.3].index
-    #     im_idx_stress = (idx_dia[0] + idx_sys[0]) // 2
-    #     im_len_stress = self.df_stress.loc[self.df_stress.index[im_idx_stress], 'z_value']
-    #     idx_dia = self.df_dia[self.df_dia['elliptic_ratio_dia_rest'] >= 1.3].index
-    #     idx_sys = self.df_dia[self.df_dia['elliptic_ratio_dia_stress'] >= 1.3].index
-    #     im_idx_dia = (idx_dia[0] + idx_sys[0]) // 2
-    #     im_len_dia = (self.df_dia.loc[self.df_dia.index[im_idx_dia], 'z_value_x'] +
-    #                     self.df_dia.loc[self.df_dia.index[im_idx_dia], 'z_value_y']) / 2
-    #     idx_dia = self.df_sys[self.df_sys['elliptic_ratio_sys_rest'] >= 1.3].index
-    #     idx_sys = self.df_sys[self.df_sys['elliptic_ratio_sys_stress'] >= 1.3].index
-    #     im_idx_sys = (idx_dia[0] + idx_sys[0]) // 2
-    #     im_len_sys = (self.df_sys.loc[self.df_sys.index[im_idx_sys], 'z_value_x'] + 
-    #                     self.df_sys.loc[self.df_sys.index[im_idx_sys], 'z_value_y']) / 2
-    #     im_len = (im_len_rest + im_len_stress + im_len_dia + im_len_sys) / 4
-    #     im_idx = (im_idx_rest + im_idx_dia + im_idx_sys) // 3
-    #     mla_idx = (ost_idx_rest - im_idx) // 2
-    #     mla_idx_stress = (ost_idx_stress - im_idx_stress) // 2
-
-    #     df = pd.DataFrame({
-    #         'patient_id': [self.patient_data.id],
-    #         'mean_intramural_length': [im_len],
-    #         'pulsatile_rest_lumen_ost': self.df_rest.iloc[ost_idx_rest]['delta_lumen_area'],
-    #         'pulsatile_rest_min_ost': self.df_rest.iloc[ost_idx_rest]['delta_min_dist'],
-    #         'pulsatile_rest_ellip_ost': self.df_rest.iloc[ost_idx_rest]['delta_elliptic_ratio'],
-    #         'pulsatile_rest_pca_ost': self.df_rest.iloc[ost_idx_rest]['lumen_change_rest'],
-    #         'pulsatile_rest_lumen_mla': self.df_rest.iloc[mla_idx]['delta_lumen_area'],
-    #         'pulsatile_rest_min_mla': self.df_rest.iloc[mla_idx]['delta_min_dist'],
-    #         'pulsatile_rest_ellip_mla': self.df_rest.iloc[mla_idx]['delta_elliptic_ratio'],
-    #         'pulsatile_rest_pca_mla': self.df_rest.iloc[mla_idx]['lumen_change_rest'],
-    #         'pulsatile_stress_lumen_ost': self.df_stress.iloc[ost_idx_stress]['delta_lumen_area'],
-    #         'pulsatile_stress_min_ost': self.df_stress.iloc[ost_idx_stress]['delta_min_dist'],
-    #         'pulsatile_stress_ellip_ost': self.df_stress.iloc[ost_idx_stress]['delta_elliptic_ratio'],
-    #         'pulsatile_stress_pca_ost': self.df_stress.iloc[ost_idx_stress]['lumen_change_stress'],
-    #         'pulsatile_stress_lumen_mla': self.df_stress.iloc[mla_idx_stress]['delta_lumen_area'],
-    #         'pulsatile_stress_min_mla': self.df_stress.iloc[mla_idx_stress]['delta_min_dist'],
-    #         'pulsatile_stress_ellip_mla': self.df_stress.iloc[mla_idx_stress]['delta_elliptic_ratio'],
-    #         'pulsatile_stress_pca_mla': self.df_stress.iloc[mla_idx_stress]['lumen_change_stress'],
-    #         'stressind_dia_lumen_ost': self.df_dia.iloc[ost_idx_dia]['delta_lumen_area'],
-    #         'stressind_dia_min_ost': self.df_dia.iloc[ost_idx_dia]['delta_min_dist'],
-    #         'stressind_dia_ellip_ost': self.df_dia.iloc[ost_idx_dia]['delta_elliptic_ratio'],
-    #         'stressind_dia_pca_ost': self.df_dia.iloc[ost_idx_dia]['lumen_change_diadia'],
-    #         'stressind_dia_lumen_mla': self.df_dia.iloc[mla_idx]['delta_lumen_area'],
-    #         'stressind_dia_min_mla': self.df_dia.iloc[mla_idx]['delta_min_dist'],
-    #         'stressind_dia_ellip_mla': self.df_dia.iloc[mla_idx]['delta_elliptic_ratio'],
-    #         'stressind_dia_pca_mla': self.df_dia.iloc[mla_idx]['lumen_change_diadia'],
-    #         'stressind_sys_lumen_ost': self.df_sys.iloc[ost_idx_sys]['delta_lumen_area'],
-    #         'stressind_sys_min_ost': self.df_sys.iloc[ost_idx_sys]['delta_min_dist'],
-    #         'stressind_sys_ellip_ost': self.df_sys.iloc[ost_idx_sys]['delta_elliptic_ratio'],
-    #         'stressind_sys_pca_ost': self.df_sys.iloc[ost_idx_sys]['lumen_change_syssys'],
-    #         'stressind_sys_lumen_mla': self.df_sys.iloc[mla_idx]['delta_lumen_area'],
-    #         'stressind_sys_min_mla': self.df_sys.iloc[mla_idx]['delta_min_dist'],
-    #         'stressind_sys_ellip_mla': self.df_sys.iloc[mla_idx]['delta_elliptic_ratio'],
-    #         'stressind_sys_pca_mla': self.df_sys.iloc[mla_idx]['lumen_change_syssys'],
-    #         # 'pulsatile_rest_lumen_20': None,
-    #         # 'pulsatile_rest_min_20': None,
-    #         # 'pulsatile_rest_ellip_20': None,
-    #         # 'pulsatile_rest_pca_20': None,
-    #         # 'pulsatile_rest_lumen_40': None,
-    #         # 'pulsatile_rest_min_40': None,
-    #         # 'pulsatile_rest_ellip_40': None,
-    #         # 'pulsatile_rest_pca_40': None,
-    #         # 'pulsatile_rest_lumen_60': None,
-    #         # 'pulsatile_rest_min_60': None,
-    #         # 'pulsatile_rest_ellip_60': None,
-    #         # 'pulsatile_rest_pca_60': None,
-    #         # 'pulsatile_rest_lumen_80': None,
-    #         # 'pulsatile_rest_min_80': None,
-    #         # 'pulsatile_rest_ellip_80': None,
-    #         # 'pulsatile_rest_pca_80': None,
-    #         # 'pulsatile_rest_lumen_100': None,
-    #         # 'pulsatile_rest_min_100': None,
-    #         # 'pulsatile_rest_ellip_100': None,
-    #         # 'pulsatile_rest_pca_100': None,
-    #         # 'pulsatile_stress_lumen_20': None,
-    #         # 'pulsatile_stress_min_20': None,
-    #         # 'pulsatile_stress_ellip_20': None,
-    #         # 'pulsatile_stress_pca_20': None,
-    #         # 'pulsatile_stress_lumen_40': None,
-    #         # 'pulsatile_stress_min_40': None,
-    #         # 'pulsatile_stress_ellip_40': None,
-    #         # 'pulsatile_stress_pca_40': None,
-    #         # 'pulsatile_stress_lumen_60': None,
-    #         # 'pulsatile_stress_min_60': None,
-    #         # 'pulsatile_stress_ellip_60': None,
-    #         # 'pulsatile_stress_pca_60': None,
-    #         # 'pulsatile_stress_lumen_80': None,
-    #         # 'pulsatile_stress_min_80': None,
-    #         # 'pulsatile_stress_ellip_80': None,
-    #         # 'pulsatile_stress_pca_80': None,
-    #         # 'pulsatile_stress_lumen_100': None,
-    #         # 'pulsatile_stress_min_100': None,
-    #         # 'pulsatile_stress_ellip_100': None,
-    #         # 'pulsatile_stress_pca_100': None,
-    #         # 'stressind_dia_lumen_20': None,
-    #         # 'stressind_dia_min_20': None,
-    #         # 'stressind_dia_ellip_20': None,
-    #         # 'stressind_dia_pca_20': None,
-    #         # 'stressind_dia_lumen_40': None,
-    #         # 'stressind_dia_min_40': None,
-    #         # 'stressind_dia_ellip_40': None,
-    #         # 'stressind_dia_pca_40': None,
-    #         # 'stressind_dia_lumen_60': None,
-    #         # 'stressind_dia_min_60': None,
-    #         # 'stressind_dia_ellip_60': None,
-    #         # 'stressind_dia_pca_60': None,
-    #         # 'stressind_dia_lumen_80': None,
-    #         # 'stressind_dia_min_80': None,
-    #         # 'stressind_dia_ellip_80': None,
-    #         # 'stressind_dia_pca_80': None,
-    #         # 'stressind_dia_lumen_100': None,
-    #         # 'stressind_dia_min_100': None,
-    #         # 'stressind_dia_ellip_100': None,
-    #         # 'stressind_dia_pca_100': None,
-    #         # 'stressind_sys_lumen_20': None,
-    #         # 'stressind_sys_min_20': None,
-    #         # 'stressind_sys_ellip_20': None,
-    #         # 'stressind_sys_pca_20': None,
-    #         # 'stressind_sys_lumen_40': None,
-    #         # 'stressind_sys_min_40': None,
-    #         # 'stressind_sys_ellip_40': None,
-    #         # 'stressind_sys_pca_40': None,
-    #         # 'stressind_sys_lumen_60': None,
-    #         # 'stressind_sys_min_60': None,
-    #         # 'stressind_sys_ellip_60': None,
-    #         # 'stressind_sys_pca_60': None,
-    #         # 'stressind_sys_lumen_80': None,
-    #         # 'stressind_sys_min_80': None,
-    #         # 'stressind_sys_ellip_80': None,
-    #         # 'stressind_sys_pca_80': None,
-    #         # 'stressind_sys_lumen_100': None,
-    #         # 'stressind_sys_min_100': None,
-    #         # 'stressind_sys_ellip_100': None,
-    #         # 'stressind_sys_pca_100': None,
-    #     })
-
-    #     global_stats_path = os.path.join(self.global_dir, 'local_patient_stats.csv')
-    #     if os.path.exists(global_stats_path):
-    #         df_existing = pd.read_csv(global_stats_path)
-    #         # Remove any existing row for this patient_id
-    #         df_existing = df_existing[df_existing['patient_id'] != self.patient_data.id]
-    #         df_combined = pd.concat([df_existing, df], ignore_index=True)
-    #         df_combined.to_csv(global_stats_path, index=False)
-    #     else:
-    #         df.to_csv(global_stats_path, index=False)
-    #     logger.info(f"Saved patient stats to {global_stats_path}")
