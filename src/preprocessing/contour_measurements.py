@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import math
 
 def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
     """ Input: arr with shape (n, 4): (idx, x, y, z) with several contours.
@@ -52,3 +54,61 @@ def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
         results.append([contour_id, z, area, min_dist, max_dist, elliptic_ratio])
 
     return np.array(results, dtype=float)
+
+
+def calculate_displacement_map(
+        arr1: np.ndarray, 
+        arr2: np.ndarray, 
+        im_length: float, 
+        pressure_change: float,
+        time_change: float = np.nan,
+        output_path: str = "displacement_map.csv"
+    ) -> np.ndarray:
+    # 1) compute distances
+    xy1 = arr1[:, 1:3]
+    xy2 = arr2[:, 1:3]
+    distances = np.linalg.norm(xy1 - xy2, axis=1)
+
+    # 2) reshape into (501, num_contours)
+    num_contours = distances.size // 501
+    displacement_map = distances.reshape(num_contours, 501).T  # (501, num_contours)
+
+    # 3) pad to 504 rows by repeating last row 3×
+    last_row = displacement_map[-1:, :]            # shape: (1, num_contours)
+    padding  = np.repeat(last_row, 3, axis=0)      # shape: (3, num_contours)
+    padded_map = np.vstack((displacement_map, padding))  # (504, num_contours)
+
+    # 4) downsample rows into 36 groups of 14
+    group_size = 14
+    num_groups = padded_map.shape[0] // group_size  # = 36
+    summarized_map = (
+        padded_map
+        .reshape(num_groups, group_size, num_contours)
+        .mean(axis=1)                                 # (36, num_contours)
+    )
+
+    # 5) z-coordinates per contour
+    z_coords = arr1[::501, 3]
+
+    # 6) build bins of width = im_length / 5, as many as fit up to max(z)
+    im_length = float(im_length)
+    bin_width = im_length / 5
+    num_bins  = math.ceil(z_coords.max() / bin_width)
+    edges     = np.arange(num_bins+1) * bin_width
+    bins      = np.digitize(z_coords, edges) - 1     # 0-based
+
+    # 7) aggregate each bin
+    final_map = np.full((num_groups, num_bins), np.nan)
+    for i in range(num_bins):
+        mask = (bins == i)
+        if mask.any():
+            final_map[:, i] = summarized_map[:, mask].mean(axis=1)
+    
+    if time_change is not np.nan:
+        final_map /= (pressure_change * time_change)
+    else:
+        final_map /= pressure_change
+
+    col_labels = [f"bin_{j}" for j in range(final_map.shape[1])]
+    df = pd.DataFrame(final_map, columns=col_labels)
+    df.to_csv(output_path, index=False)

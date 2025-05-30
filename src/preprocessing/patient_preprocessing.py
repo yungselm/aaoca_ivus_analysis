@@ -5,14 +5,18 @@ from sklearn.decomposition import PCA
 from loguru import logger
 
 from data_io.patient_data import PatientData
-from preprocessing.contour_measurements import compute_contour_properties
+from preprocessing.contour_measurements import compute_contour_properties, calculate_displacement_map
 
 from typing import Tuple, List, Dict
 
 
-class PatientStats:
+class PatientPreprocessing:
     def __init__(self, patient_data: PatientData, output_dir: str, global_dir: str):
         self.patient_data = patient_data
+        self.adjusted_dia_rest: np.ndarray = None
+        self.adjusted_dia_stress: np.ndarray = None
+        self.adjusted_sys_rest: np.ndarray = None
+        self.adjusted_sys_stress: np.ndarray = None
         self.output_dir   = os.path.join(output_dir, f"{patient_data.id}_stats")
         self.global_dir   = global_dir
 
@@ -24,6 +28,7 @@ class PatientStats:
         self.df_stress = pd.DataFrame()
         self.df_dia = pd.DataFrame()
         self.df_sys = pd.DataFrame()
+        self.patient_df: Dict = {}
 
     def _normalize_all_contour_z(self) -> None:
         """
@@ -64,7 +69,40 @@ class PatientStats:
         self.compute_diadia_syssys_properties(df_short_dia, phase='dia-dia')
         self.compute_diadia_syssys_properties(df_short_sys, phase='sys-sys')
 
+        # 3) save patient data
         self.save_selected_to_global_stats()
+
+        # 4) calculate distance maps.
+        rest_path = os.path.join(self.output_dir, 'rest_sys_dia_displacement_map.csv')
+        stress_path = os.path.join(self.output_dir, 'stress_sys_dia_displacement_map.csv')
+        dia_path = os.path.join(self.output_dir, 'dia_dia_displacement_map.csv')
+        sys_path = os.path.join(self.output_dir, 'sys_sys_displacement_map.csv')
+        calculate_displacement_map(
+            self.patient_data.rest_contours_dia,
+            self.patient_data.rest_contours_sys,
+            self.patient_df['mean_intramural_length'][0],
+            self.patient_df['pressure_change_pulsatile_rest'][0],
+            self.patient_df['time_change_pulsatile_rest'][0],
+            output_path=rest_path)
+        calculate_displacement_map(
+            self.patient_data.stress_contours_dia,
+            self.patient_data.stress_contours_sys,
+            self.patient_df['mean_intramural_length'][0],
+            self.patient_df['pressure_change_pulsatile_stress'][0],
+            self.patient_df['time_change_pulsatile_stress'][0],
+            output_path=stress_path)
+        calculate_displacement_map(
+            self.adjusted_dia_rest,
+            self.adjusted_dia_stress,
+            self.patient_df['mean_intramural_length'][0],
+            self.patient_df['pressure_change_stressind_dia'][0],
+            output_path=dia_path)
+        calculate_displacement_map(
+            self.adjusted_sys_rest,
+            self.adjusted_sys_stress,
+            self.patient_df['mean_intramural_length'][0],
+            self.patient_df['pressure_change_stressind_sys'][0],
+            output_path=sys_path)
 
     def compute_lumen_changes(self) -> Dict[str,List[float]]:
         results = {}
@@ -251,6 +289,10 @@ class PatientStats:
             self.patient_data.rest_contours_sys,
             self.patient_data.stress_contours_sys
         )
+        self.adjusted_dia_rest   = short_dia_rest
+        self.adjusted_dia_stress = short_dia_stress
+        self.adjusted_sys_rest   = short_sys_rest
+        self.adjusted_sys_stress = short_sys_stress
 
         p_dia = compute_contour_properties(short_dia_stress)
         p_sys = compute_contour_properties(short_sys_stress)
@@ -678,6 +720,7 @@ class PatientStats:
         # 7) Add section stats to the output DataFrame
         for key, value in section_stats.items():
             data[key] = value
+        self.patient_df = data
         df_out = pd.DataFrame(data)
 
         # 8) Append or write out
