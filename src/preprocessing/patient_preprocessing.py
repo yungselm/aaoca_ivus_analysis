@@ -5,7 +5,7 @@ from sklearn.decomposition import PCA
 from loguru import logger
 
 from data_io.patient_data import PatientData
-from stats.contour_measurements import compute_contour_properties
+from preprocessing.contour_measurements import compute_contour_properties
 
 from typing import Tuple, List, Dict
 
@@ -499,7 +499,6 @@ class PatientStats:
         im_20_per = im_len * 0.2
         n_intramural = round(im_len / im_20_per)
         n_segments = n_intramural + 3 # number of segments for extramural, 3 based on data
-        print(f"patient {self.patient_data.id} with intramural length {im_len} has {n_intramural} intramural segments, {n_segments} total segments")
 
         section_stats = {}
         for phase, df in (
@@ -692,4 +691,3 @@ class PatientStats:
             df_out.to_csv(global_stats_path, index=False)
 
         logger.info(f"Saved patient stats to {global_stats_path}")
-

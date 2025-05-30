@@ -6,7 +6,7 @@ import pandas as pd
 from data_io.global_data import GlobalData
 from data_io.patient_data import LoadIndividualData
 from stats.global_stats import GlobalStats
-from stats.patient_preprocessing import PatientStats
+from preprocessing.patient_preprocessing import PatientStats
 
 GLOBAL_PATH = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data_eacvi"
 GLOBAL_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data_eacvi/output/global_stats"

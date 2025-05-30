@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def _get_ostium_points(points, level=0, tol=1e-5):
+def _get_ostium_points(points, level=0, tol=1e-5) -> np.ndarray:
     """
     Returns the points corresponding to a specific highest z-value level.
     
@@ -25,7 +25,7 @@ def _get_ostium_points(points, level=0, tol=1e-5):
 
 
 def plot_comparison_frames(rest_diastole_mesh, rest_systole_mesh, 
-                           stress_diastole_mesh, stress_systole_mesh):
+                           stress_diastole_mesh, stress_systole_mesh) -> None:
     """
     Plots pulsatile and stress-induced lumen deformation.
     
