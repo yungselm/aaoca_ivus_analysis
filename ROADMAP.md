@@ -3,7 +3,7 @@
 ## Phase 1: Load in Data and bring in usable format
 - [x] Load global data
 - [x] Load individual pressure and ivus data combine in class object
-- [] Fix bugs in Loess data
+- [] Fix bugs in Loess data -> not really necessary since Rust aligned IVUS more reliable anyways
 
 ## Phase 2: Global statistics
 - [x] Plot pressure change FFR, PdPa, systolic ratio  (Change FFR, iFR)

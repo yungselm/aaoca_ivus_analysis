@@ -31,6 +31,7 @@ class PatientStats:
           rest_contours_dia, rest_contours_sys,
           stress_contours_dia, stress_contours_sys
         subtract its own max-z and take abs, in place.
+        This ensures that ostium is at position 0.
         """
         for attr in (
             'rest_contours_dia',
@@ -65,6 +66,36 @@ class PatientStats:
 
         self.save_selected_to_global_stats()
 
+    def compute_lumen_changes(self) -> Dict[str,List[float]]:
+        results = {}
+        # rest
+        if None not in self.patient_data.pressure_rest and None not in self.patient_data.time_rest:
+            dp = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
+            dt = self.patient_data.time_rest[1]     - self.patient_data.time_rest[0]
+            df = self._calculate_lumen_change(
+                self.patient_data.rest_contours_dia,
+                self.patient_data.rest_contours_sys,
+                dp, dt, type='rest-stress'
+            )
+            results["rest"] = df
+        # stress
+        if None not in self.patient_data.pressure_stress and None not in self.patient_data.time_stress:
+            dp = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
+            dt = self.patient_data.time_stress[1]     - self.patient_data.time_stress[0]
+            df = self._calculate_lumen_change(
+                self.patient_data.stress_contours_dia,
+                self.patient_data.stress_contours_sys,
+                dp, dt, type='rest-stress'
+            )
+            results["stress"] = df
+
+        for cond, df in results.items():
+            df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
+            path = os.path.join(self.output_dir, f"{cond}_lumen_changes.csv")
+            df.to_csv(path, index=False)
+            logger.info(f"Saved {cond} lumen changes to {path}")
+        return results
+    
     def _calculate_lumen_change(
         self,
         contours_dia: np.ndarray,
@@ -74,6 +105,13 @@ class PatientStats:
         type: str = 'rest-stress'
     ) -> List[float]:
         lumen_changes = []
+        anisotropy_indices = []
+        pc_ratios = []
+        pc1_vars = []
+        pc2_vars = []
+        pc1_dirs = []
+        pc2_dirs = []
+
         if contours_dia is None or contours_sys is None:
             logger.warning("Contours data is missing.")
             return lumen_changes
@@ -102,50 +140,60 @@ class PatientStats:
 
             disp = s_pts - d_pts
             try:
-                pca = PCA(n_components=3)
+                pca = PCA(n_components=2)
                 pca.fit(disp)
-                tot_var = pca.explained_variance_.sum()
+                pc_vars = pca.explained_variance_
+                pc_ratio = pca.explained_variance_ratio_
+                anisotropy = pc_vars[1] / pc_vars[0]
+                pc1_dir, pc2_dir = pca.components_[:2]
+
                 if type=='rest-stress':
-                    change = tot_var/(delta_pressure*delta_time)
+                    change = pc_vars.sum() / (delta_pressure*delta_time)
+                    anisotropy_index = anisotropy / (delta_pressure*delta_time)
+                    pc1_var = pc_vars[0] / (delta_pressure*delta_time)
+                    pc2_var = pc_vars[1] / (delta_pressure*delta_time)
+                    pc_ratio = pc_ratio[0] / (delta_pressure*delta_time)
+                    pc1_dir = pc1_dir / (delta_pressure*delta_time)
+                    pc2_dir = pc2_dir / (delta_pressure*delta_time)
                 else:  # dia–dia or sys–sys
-                    change = tot_var/delta_pressure
+                    change = pc_vars.sum() / delta_pressure
+                    anisotropy_index = anisotropy / delta_pressure
+                    pc1_var = pc_vars[0] / delta_pressure
+                    pc2_var = pc_vars[1] / delta_pressure
+                    pc_ratio = pc_ratio[0] / delta_pressure
+                    pc1_dir = pc1_dir / delta_pressure
+                    pc2_dir = pc2_dir / delta_pressure
                 lumen_changes.append(change)
+                anisotropy_indices.append(anisotropy_index)
+                pc_ratios.append(pc_ratio)
+                pc1_vars.append(pc1_var)
+                pc2_vars.append(pc2_var)
+                pc1_dirs.append(pc1_dir)
+                pc2_dirs.append(pc2_dir)
+
             except Exception as e:
                 logger.error(f"PCA failed for contour {cid}: {e}")
                 lumen_changes.append(np.nan)
+                anisotropy_indices.append(np.nan)
+                pc_ratios.append(np.nan)
+                pc1_vars.append(np.nan)
+                pc2_vars.append(np.nan)
+                pc1_dirs.append(np.nan)
+                pc2_dirs.append(np.nan)
 
-        return lumen_changes
-
-    def compute_lumen_changes(self) -> Dict[str,List[float]]:
-        results = {}
-        # rest
-        if None not in self.patient_data.pressure_rest and None not in self.patient_data.time_rest:
-            dp = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
-            dt = self.patient_data.time_rest[1]     - self.patient_data.time_rest[0]
-            results['rest'] = self._calculate_lumen_change(
-                self.patient_data.rest_contours_dia,
-                self.patient_data.rest_contours_sys,
-                dp, dt, type='rest-stress'
-            )
-        # stress
-        if None not in self.patient_data.pressure_stress and None not in self.patient_data.time_stress:
-            dp = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
-            dt = self.patient_data.time_stress[1]     - self.patient_data.time_stress[0]
-            results['stress'] = self._calculate_lumen_change(
-                self.patient_data.stress_contours_dia,
-                self.patient_data.stress_contours_sys,
-                dp, dt, type='rest-stress'
-            )
-
-        for cond, changes in results.items():
-            df = pd.DataFrame({
-                'contour_id':           range(len(changes)),
-                f'lumen_change_{cond}': changes
-            })
-            path = os.path.join(self.output_dir, f'{cond}_lumen_changes.csv')
-            df.to_csv(path, index=False)
-            logger.info(f"Saved {cond} lumen changes to {path}")
-        return results
+        df = pd.DataFrame({
+            "contour_id":          range(len(lumen_changes)),
+            "lumen_change":        lumen_changes,
+            "anisotropy_index":    anisotropy_indices,
+            "pc_ratio":            pc_ratios,
+            "pc1_var":             pc1_vars,
+            "pc2_var":             pc2_vars,
+            "pc1_dir_x":           [d[0] for d in pc1_dirs],
+            "pc1_dir_y":           [d[1] for d in pc1_dirs],
+            "pc2_dir_x":           [d[0] for d in pc2_dirs],
+            "pc2_dir_y":           [d[1] for d in pc2_dirs],
+        })
+        return df
 
     def compute_sys_dia_properties(self, phase='rest') -> None:
         if phase=='rest':
@@ -194,7 +242,7 @@ class PatientStats:
 
     def compute_lumen_changes_diadia_syssys(
         self
-    ) -> Tuple[Dict[str,List[float]], pd.DataFrame, pd.DataFrame]:
+    ) -> Dict[str,pd.DataFrame]:
         short_dia_rest, short_dia_stress = self.shorten_and_reindex(
             self.patient_data.rest_contours_dia,
             self.patient_data.stress_contours_dia
@@ -245,12 +293,8 @@ class PatientStats:
             )
         }
 
-        
-        for cond, changes in results.items():
-            df = pd.DataFrame({
-                'contour_id':           range(len(changes)),
-                f'lumen_change_{cond}': changes
-            })
+        for cond, df in results.items():
+            df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
             path = os.path.join(self.output_dir, f'{cond}_lumen_changes.csv')
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
