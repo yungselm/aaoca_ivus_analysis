@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import math
 
+
 def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
     """ Input: arr with shape (n, 4): (idx, x, y, z) with several contours.
     Output: arr with shape (m, 5): (idx, z, area, min_dist, max_dist, elliptic_ratio)."""

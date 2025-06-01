@@ -19,9 +19,10 @@ class GlobalData:
         df.drop(columns=['narco_id'])
 
         self.df_all = df
+        self._clean_pressure_data()
         ids = self.collect_ids()
         
-        return df, ids
+        return self.df_all, ids
     
     def collect_ids(self) -> List:
         return self.df_all["patient_id"].unique()
@@ -33,7 +34,9 @@ class GlobalData:
         return df
 
     def _clean_pressure_data(self):
-        pass
+        """Remove columns ending with '_high', '_low', or containing '_low' anywhere in the name."""
+        cols_to_drop = [col for col in self.df_all.columns if col.endswith('_high') or '_low' in col]
+        self.df_all = self.df_all.drop(columns=cols_to_drop)
 
     def load_ivus_data(self):
         dir = os.path.join(self.working_dir, "IVUS_data.xlsx")
