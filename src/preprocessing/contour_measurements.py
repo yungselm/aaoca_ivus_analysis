@@ -63,12 +63,22 @@ def calculate_displacement_map(
         im_length: float, 
         pressure_change: float,
         time_change: float = np.nan,
-        output_path: str = "displacement_map.csv"
+        output_path: str = "displacement_map.csv",
+        adjust_pressure_time: bool = True,
     ) -> np.ndarray:
     # 1) compute distances
+    center = np.array([4.5, 4.5])
     xy1 = arr1[:, 1:3]
     xy2 = arr2[:, 1:3]
     distances = np.linalg.norm(xy1 - xy2, axis=1)
+
+    # Compute the “signed” distances:
+    # If arr2’s point is farther from center than arr1’s point, keep positive.
+    # Otherwise, make negative.
+    d1_center = np.linalg.norm(xy1 - center, axis=1)
+    d2_center = np.linalg.norm(xy2 - center, axis=1)
+    signs = np.where(d2_center > d1_center, 1.0, -1.0)
+    distances = distances * signs  # now 'distances' is signed
 
     # 2) reshape into (501, num_contours)
     num_contours = distances.size // 501
@@ -104,11 +114,12 @@ def calculate_displacement_map(
         mask = (bins == i)
         if mask.any():
             final_map[:, i] = summarized_map[:, mask].mean(axis=1)
-    
-    if time_change is not np.nan:
-        final_map /= (pressure_change * time_change)
-    else:
-        final_map /= pressure_change
+            
+    if adjust_pressure_time:
+        if time_change is not np.nan:
+            final_map /= (pressure_change * time_change)
+        else:
+            final_map /= pressure_change
 
     col_labels = [f"bin_{j}" for j in range(final_map.shape[1])]
     df = pd.DataFrame(final_map, columns=col_labels)

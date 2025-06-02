@@ -25,7 +25,7 @@ def main():
     # global_stats.plot_global_change(mode="lumen")
     # global_stats.plot_global_change(mode="mln")
 
-    ids = ['narco_119', 'narco_122', 'narco_216', 'narco_218', 'narco_234', 'narco_303']
+    ids = ['narco_119', 'narco_122', 'narco_216', 'narco_218', 'narco_234', 'narco_303', 'narco_295', 'narco_281', 'narco_282', 'narco_288', 'narco_276']
     for id in ids:
         try:
             # Plot individual patient data

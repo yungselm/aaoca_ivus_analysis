@@ -83,26 +83,30 @@ class PatientPreprocessing:
             self.patient_df['mean_intramural_length'][0],
             self.patient_df['pressure_change_pulsatile_rest'][0],
             self.patient_df['time_change_pulsatile_rest'][0],
-            output_path=rest_path)
+            output_path=rest_path,
+            adjust_pressure_time=False)
         calculate_displacement_map(
             self.patient_data.stress_contours_dia,
             self.patient_data.stress_contours_sys,
             self.patient_df['mean_intramural_length'][0],
             self.patient_df['pressure_change_pulsatile_stress'][0],
             self.patient_df['time_change_pulsatile_stress'][0],
-            output_path=stress_path)
+            output_path=stress_path,
+            adjust_pressure_time=False)
         calculate_displacement_map(
             self.adjusted_dia_rest,
             self.adjusted_dia_stress,
             self.patient_df['mean_intramural_length'][0],
             self.patient_df['pressure_change_stressind_dia'][0],
-            output_path=dia_path)
+            output_path=dia_path,
+            adjust_pressure_time=False)
         calculate_displacement_map(
             self.adjusted_sys_rest,
             self.adjusted_sys_stress,
             self.patient_df['mean_intramural_length'][0],
             self.patient_df['pressure_change_stressind_sys'][0],
-            output_path=sys_path)
+            output_path=sys_path,
+            adjust_pressure_time=False)
 
     def compute_lumen_changes(self) -> Dict[str,List[float]]:
         results = {}
