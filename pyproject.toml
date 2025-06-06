@@ -8,12 +8,20 @@ dependencies = [
     "matplotlib>=3.10.1",
     "numpy>=2.2.5",
     "openpyxl>=3.1.5",
-    "pandas>=2.2.3",
+    "pandas>=2.3.0",
     "loguru>=0.7.3",
     "scikit-learn>=1.6.1",
     "statsmodels>=0.14.4",
     "seaborn>=0.13.2",
     "scipy>=1.13.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "black",
+    "mypy",
+    "ruff"
 ]
 
 [build-system]
@@ -23,3 +31,20 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]  # looks for packages in src directory
 include = ["*"] 
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+strict = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F401"]  # Unused imports (F401), plus you can add others
+fixable = ["F401"]

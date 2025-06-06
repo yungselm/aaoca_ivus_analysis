@@ -4,6 +4,7 @@
 - [x] Load global data
 - [x] Load individual pressure and ivus data combine in class object
 - [] Fix bugs in Loess data -> not really necessary since Rust aligned IVUS more reliable anyways
+- [] For patient data also get lumen area systole and lumen area diastole (non normalized) and save to local_patient_stats (so can calculate percent changes if wanted)
 
 ## Phase 2: Global statistics
 - [x] Plot pressure change FFR, PdPa, systolic ratio  (Change FFR, iFR)
@@ -13,6 +14,7 @@
 - [] Correlate pressure change with lumen change
 - [x] All IVUS measurements as predictors for FFR<=0.8
 - [x] All IVUS measurements as predictors for iFR<=0.8
+- [] KDE plot area/elliptic ratio for hemodynamic relevant and non-relevant
 
 ## Phase 3: Patient statistics
 - [] Quantify dynamics for pulsatile/stress-induced lumen changes
@@ -21,6 +23,7 @@
 - [] Pulsatile in combination with anatomical for prediction
 - [] Vessels with more dynamic more often relevant?
 
-## Phase 4: Advanced Visulizations
-- [] Load in png with deformation information from Rust program, summarize pixels to degree groups bin into 20 percent of intramural get the values of all patients summarize in a heatmap
+## Phase 4: Advanced Visualizations
+- [x] Load in png with deformation information from Rust program, summarize pixels to degree groups bin into 20 percent of intramural get the values of all patients summarize in a heatmap
+- [] Add subplot to deformation map with box plots/violing plots for area below per bin 
 - [] Video of a point moving over a pressure curve in realtime.
