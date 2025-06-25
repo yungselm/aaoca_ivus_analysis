@@ -446,9 +446,6 @@ def plot_heatmap_and_paired_violins_or_box(
     ax_heat.invert_xaxis()
 
     # Draw a horizontal black line at y=0, from the middle (x=5) to the right edge (accounting for inverted x-axis)
-    ax_heat.hlines(y=0.5, xmin=1.5-n_circumferential_bins, xmax=5, color='violet', linestyle='--')
-    ax_heat.hlines(y=n_radial_bins // 2 + 0.5, xmin=1-n_circumferential_bins, xmax=5, color='orange', linestyle='--')
-    ax_heat.hlines(y=n_radial_bins - 0.5, xmin=1-n_circumferential_bins, xmax=5, color='violet', linestyle='--')
     ax_heat.hlines(y=n_radial_bins // 4 + 0.5, xmin=1-n_circumferential_bins, xmax=5, color='red', linestyle='--')
     ax_heat.hlines(y=(n_radial_bins - n_radial_bins // 4) + 0.5, xmin=1-n_circumferential_bins, xmax=5, color='blue', linestyle='--')
 
@@ -540,13 +537,73 @@ def plot_heatmap_and_paired_violins_or_box(
         dia_patch = Patch(facecolor=dia_color, label="Lumen Area Rest")
         sys_patch = Patch(facecolor=sys_color, label="Lumen Area Stress")        
     ax_v.legend(handles=[dia_patch, sys_patch], loc="upper right")
-
+    # Save the figure under data/output/global_stats
+    output_dir = Path("data/output/global_stats")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_dir / f"{phase}_deformation_heatmap.png")
     plt.show()
 
+def save_exact_heatmap(
+    disp_df,
+    phase: str,
+    width: int = 501,
+    height: int = 21,
+    cmap_heat: str = "viridis",
+    disp_min: float | None = None,
+    disp_max: float | None = None,
+    output_dir: Path = Path("data/output/global_stats"),
+    filename: str | None = None,
+):
+    """
+    Save the heatmap of disp_df as a PNG exactly 501x21 pixels.
+    """
+    # target size
+    width_px, height_px = width, height
+    dpi = 100
+
+    # convert to inches
+    fig_w = width_px  / dpi
+    fig_h = height_px / dpi
+
+    # create figure & axis
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
+
+    # eliminate all padding/margins
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    data = disp_df.T.iloc[:, ::-1]
+
+    # draw heatmap
+    sns.heatmap(
+        data=data,
+        ax=ax,
+        cmap=cmap_heat,
+        cbar=False,
+        xticklabels=False,
+        yticklabels=False,
+        vmin=disp_min,
+        vmax=disp_max,
+    )
+
+    # strip axes entirely
+    ax.set_axis_off()
+
+    # ensure output folder exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_name = filename or f"{phase}_heatmap_{width}x{height}.png"
+
+    # save with no extra cropping
+    fig.savefig(
+        output_dir / out_name,
+        dpi=dpi,
+        bbox_inches=None,
+        pad_inches=0
+    )
+    plt.close(fig)
 
 if __name__ == "__main__":
     disp_dict = _create_summary_displacement("data/output/patient_stats")
     meas_dict = load_measurement_data("data/output/patient_stats")
+    print(disp_dict)
     # find max value and min value from disp_dict
     disp_min = float("inf")
     disp_max = float("-inf")
@@ -562,33 +619,48 @@ if __name__ == "__main__":
         meas_df=meas_dict["rest"],
         cmap_heat="coolwarm",
         box_plot=True,
-        disp_max=disp_max,
-        disp_min=disp_min,
+        # disp_max=disp_max,
+        # disp_min=disp_min,
     )
-    plot_heatmap_and_paired_violins_or_box(
-        phase='stress',
-        disp_df=disp_dict["stress_sys_dia"],
-        meas_df=meas_dict["stress"],
-        cmap_heat="coolwarm",
-        box_plot=True,
-        disp_max=disp_max,
-        disp_min=disp_min,
-    )
+    # plot_heatmap_and_paired_violins_or_box(
+    #     phase='stress',
+    #     disp_df=disp_dict["stress_sys_dia"],
+    #     meas_df=meas_dict["stress"],
+    #     cmap_heat="coolwarm",
+    #     box_plot=True,
+    #     disp_max=disp_max,
+    #     disp_min=disp_min,
+    # )
     plot_heatmap_and_paired_violins_or_box(
         phase="dia_dia", 
         disp_df=disp_dict["dia_dia"], 
         meas_df=meas_dict["dia_dia"],
         cmap_heat="coolwarm",
         box_plot=True,
-        disp_max=disp_max,
-        disp_min=disp_min,
+        # disp_max=disp_max,
+        # disp_min=disp_min,
     )
-    plot_heatmap_and_paired_violins_or_box(
-        phase='sys_sys',
-        disp_df=disp_dict["sys_sys"], 
-        meas_df=meas_dict["sys_sys"],
+    # plot_heatmap_and_paired_violins_or_box(
+    #     phase='sys_sys',
+    #     disp_df=disp_dict["sys_sys"], 
+    #     meas_df=meas_dict["sys_sys"],
+    #     cmap_heat="coolwarm",
+    #     box_plot=True,
+    #     disp_max=disp_max,
+    #     disp_min=disp_min,
+    # )
+
+    save_exact_heatmap(
+        disp_df=disp_dict["rest_sys_dia"],
+        phase="rest",
         cmap_heat="coolwarm",
-        box_plot=True,
-        disp_max=disp_max,
-        disp_min=disp_min,
+        # disp_min=disp_min,
+        # disp_max=disp_max,
+    )
+
+    save_exact_heatmap(
+        disp_df=disp_dict["dia_dia"],
+        phase="dia_dia",
+        cmap_heat="coolwarm",
+        height=53
     )
