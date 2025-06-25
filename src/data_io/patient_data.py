@@ -6,7 +6,7 @@ from typing import List, Tuple, Optional
 import numpy as np
 import pandas as pd
 from loguru import logger
-
+import re
 
 class PatientData:
     def __init__(self, id: Optional[str] = None) -> None:
@@ -51,6 +51,7 @@ class LoadIndividualData:
     def __init__(self, path: Path, id: Optional[str] = None) -> None:
         self.working_dir: Path = Path(path)
         self.id: Optional[str] = id
+        self.file_id = id
         self.pressure_dir, self.ivus_dir, self.loess_dir = self.find_dirs()
         self.patient_data = PatientData()
 
@@ -89,6 +90,12 @@ class LoadIndividualData:
             raise FileNotFoundError(
                 f"No processed data directory for {self.id} in {processed_base_dir}"
             )
+        m = re.search(r'(narco_[0-9]+)', pressure_dir.name, flags=re.IGNORECASE)
+        if m:
+            self.file_id = m.group(1).lower()   # e.g. "narco_303"
+        else:
+            self.file_id = self.id 
+
         if ivus_dir is None:
             raise FileNotFoundError(
                 f"No IVUS data directory for {self.id} in {ivus_base_dir}"
@@ -106,7 +113,7 @@ class LoadIndividualData:
         tuples_time: List[Tuple[Optional[float], Optional[float]]] = []
 
         for phase in patterns:
-            filename = f"{self.id}_pressure_{phase}_average_curve_all.csv"
+            filename = f"{self.file_id}_pressure_{phase}_average_curve_all.csv"
             filepath = self.pressure_dir / filename
 
             try:
