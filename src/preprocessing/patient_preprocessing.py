@@ -12,6 +12,7 @@ from loguru import logger
 from preprocessing.contour_measurements import calculate_displacement_map
 from preprocessing.contour_measurements import calculate_measurement_map
 from preprocessing.contour_measurements import compute_contour_properties
+from advanced_visualizations.plot_frame_diff import plot_frame_diff
 from sklearn.decomposition import PCA
 
 
@@ -86,6 +87,7 @@ class PatientPreprocessing:
         )
         dia_path = os.path.join(self.output_dir, "dia_dia_displacement_map.csv")
         sys_path = os.path.join(self.output_dir, "sys_sys_displacement_map.csv")
+
         calculate_displacement_map(
             self.patient_data.rest_contours_dia,
             self.patient_data.rest_contours_sys,
@@ -155,6 +157,15 @@ class PatientPreprocessing:
             time_change=None,
             output_path=self.output_dir,
             adjust_pressure_time=False,
+        )
+        plot_frame_diff(
+            self.patient_data.rest_contours_dia, 
+            self.adjusted_dia_rest, 
+            self.patient_data.rest_contours_sys, 
+            self.adjusted_sys_rest,
+            self.patient_data.stress_contours_dia,
+            self.patient_data.stress_contours_sys,
+            output_dir=self.output_dir,
         )
 
     def compute_lumen_changes(self) -> Dict[str, List[float]]:
