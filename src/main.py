@@ -59,7 +59,7 @@ def main():
             patient_stats = PatientPreprocessing(
                 pat_data, PATIENT_OUTPUT, GLOBAL_OUTPUT
             )
-            patient_stats.process_case()
+            patient_stats.process_case(plot=False)
         except Exception as e:
             logger.warning(f"Skipping {id} due to error: {e}")
 

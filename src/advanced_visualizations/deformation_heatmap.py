@@ -622,15 +622,15 @@ if __name__ == "__main__":
         # disp_max=disp_max,
         # disp_min=disp_min,
     )
-    # plot_heatmap_and_paired_violins_or_box(
-    #     phase='stress',
-    #     disp_df=disp_dict["stress_sys_dia"],
-    #     meas_df=meas_dict["stress"],
-    #     cmap_heat="coolwarm",
-    #     box_plot=True,
-    #     disp_max=disp_max,
-    #     disp_min=disp_min,
-    # )
+    plot_heatmap_and_paired_violins_or_box(
+        phase='stress',
+        disp_df=disp_dict["stress_sys_dia"],
+        meas_df=meas_dict["stress"],
+        cmap_heat="coolwarm",
+        box_plot=True,
+        # disp_max=disp_max,
+        # disp_min=disp_min,
+    )
     plot_heatmap_and_paired_violins_or_box(
         phase="dia_dia", 
         disp_df=disp_dict["dia_dia"], 
@@ -640,15 +640,15 @@ if __name__ == "__main__":
         # disp_max=disp_max,
         # disp_min=disp_min,
     )
-    # plot_heatmap_and_paired_violins_or_box(
-    #     phase='sys_sys',
-    #     disp_df=disp_dict["sys_sys"], 
-    #     meas_df=meas_dict["sys_sys"],
-    #     cmap_heat="coolwarm",
-    #     box_plot=True,
-    #     disp_max=disp_max,
-    #     disp_min=disp_min,
-    # )
+    plot_heatmap_and_paired_violins_or_box(
+        phase='sys_sys',
+        disp_df=disp_dict["sys_sys"], 
+        meas_df=meas_dict["sys_sys"],
+        cmap_heat="coolwarm",
+        box_plot=True,
+        disp_max=disp_max,
+        disp_min=disp_min,
+    )
 
     save_exact_heatmap(
         disp_df=disp_dict["rest_sys_dia"],

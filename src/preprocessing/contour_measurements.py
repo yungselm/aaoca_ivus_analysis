@@ -165,10 +165,7 @@ def calculate_measurement_map(
     """
 
     # 1) Extract z_values and compute bins exactly as in your displacement code.
-    if phase == "rest" or phase == "stress":
-        z_coords = df["z_value"].values
-    else:
-        z_coords = df["z_value_y"].values
+    z_coords = df["z_value"].values
     im_length = float(im_length)
     bin_width = im_length / 5.0
     num_bins = math.ceil(z_coords.max() / bin_width)
