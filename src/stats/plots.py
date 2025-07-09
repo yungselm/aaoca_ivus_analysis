@@ -3,6 +3,37 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
+def _plot_pca(eigenvalues_dia_ls, eigenvalues_sys_ls, ids):
+        """
+        
+        """
+        _, (ax1, ax2, ax3) = plt.subplots(1,3)
+
+        eigenvalues_dia_arr = np.array(eigenvalues_dia_ls)
+        eigenvalues_sys_arr = np.array(eigenvalues_sys_ls)
+
+        eigenvalue_ratio = eigenvalues_sys_arr/eigenvalues_dia_arr
+
+        ax1.plot(ids, eigenvalues_dia_arr[:,0],label='diastolic')
+        ax1.plot(ids, eigenvalues_sys_arr[:,0], label='systolic')
+        ax1.legend()
+        ax1.set_title('PC1')
+        ax1.set_xlabel('Contour ID [-]')
+
+
+        ax2.plot(ids, eigenvalues_dia_arr[:,1], label='diastolic')
+        ax2.plot(ids, eigenvalues_sys_arr[:,1], label='systolic')
+        ax2.legend()
+        ax2.set_title('PC2')
+        ax2.set_xlabel('Contour ID [-]')
+
+        ax3.plot(ids, eigenvalue_ratio[:,0], label='PC1')
+        ax3.plot(ids, eigenvalue_ratio[:,1], label='PC2')
+        ax3.set_title('Eigenvalue Ratio Sys/Dia')
+        ax3.set_xlabel('Contour ID [-]')
+        ax3.set_ylabel(r'$\lambda$ [-]')
+        ax3.legend()
+        plt.show()
 
 def _get_ostium_points(points, level=0, tol=1e-5) -> np.ndarray:
     """
