@@ -6,6 +6,7 @@ from typing import List
 from typing import Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
 import pandas as pd
 from data_io.patient_data import PatientData
 from loguru import logger
@@ -14,6 +15,7 @@ from preprocessing.contour_measurements import calculate_measurement_map
 from preprocessing.contour_measurements import compute_contour_properties
 from advanced_visualizations.plot_frame_diff import plot_frame_diff
 from sklearn.decomposition import PCA
+from stats.plots import _plot_pca
 
 
 class PatientPreprocessing:
@@ -180,7 +182,8 @@ class PatientPreprocessing:
                 self.patient_data.rest_contours_sys,
                 dp,
                 dt,
-                type="rest-stress",
+                mode="rest-stress",
+                plot=False
             )
             results["rest"] = df
         # stress
@@ -198,7 +201,7 @@ class PatientPreprocessing:
                 self.patient_data.stress_contours_sys,
                 dp,
                 dt,
-                type="rest-stress",
+                mode="rest-stress",
             )
             results["stress"] = df
 
@@ -215,7 +218,7 @@ class PatientPreprocessing:
                 self.patient_data.dia_contours_rest,
                 self.patient_data.dia_contours_stress,
                 dp,
-                type="dia-dia",
+                mode="dia-dia",
             )
             results["dia_dia"] = df
 
@@ -232,7 +235,7 @@ class PatientPreprocessing:
                 self.patient_data.sys_contours_rest,
                 self.patient_data.sys_contours_stress,
                 dp,
-                type="sys-sys",
+                mode="sys-sys",
             )
             results["sys_sys"] = df
 
@@ -242,6 +245,59 @@ class PatientPreprocessing:
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
         return results
+    
+    @staticmethod
+    def _pca_analysis(xy_spline, z, plot=False, title_str=''):
+        """
+        Principal component analysis of the 2D lumen contour
+
+        -Parameters-
+        xy_spline: 2D np.array of shape (n,2)
+        z: Slice in [mm] being analyzed
+
+        -Return-
+        eigenvectors: as np.array of shape (2,2) with each eigenvector as column vector
+        eigenvalues: as np.array of shape (2,)    
+        """
+        
+        centroid = np.mean(xy_spline, axis=0)
+        centroid_3d = np.append(centroid, z)
+
+        centered_data = xy_spline-centroid
+
+        cov_matrix = np.cov(centered_data, rowvar=False)
+
+        eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+        idx = np.argsort(eigenvalues)[::-1]
+        eigenvalues = eigenvalues[idx]
+        eigenvectors = eigenvectors[:, idx]
+
+        # only for debugging 
+        if plot:    
+            plt.figure(figsize=(6,6))
+            plt.plot(xy_spline[:,0], xy_spline[:,1], label=f'Contour z={z}')
+            plt.scatter(*centroid, color='red', label='Centroid')
+            plt.quiver(centroid[0],centroid[1],1,0,label=r'$e_x$', scale_units='xy', scale=1)
+            plt.quiver(centroid[0],centroid[1],0,1,label=r'$e_y$', scale_units='xy', scale=1)
+
+            scale = 1 
+            for i in range(2):
+                vec = eigenvectors[:, i]
+                plt.plot(
+                    [centroid[0], centroid[0] + scale * vec[0]],
+                    [centroid[1], centroid[1] + scale * vec[1]],
+                    label=f'PC{i+1}'
+                )
+
+            plt.axis('equal')
+            plt.legend(loc='upper right')
+            plt.title(f"PCA of {title_str}")
+            plt.show()
+
+            print(f'{title_str}, PC1: {eigenvalues[0]}, PC2: {eigenvalues[1]}')
+
+        return eigenvectors, eigenvalues, centroid_3d
 
     def _calculate_lumen_change(
         self,
@@ -249,19 +305,21 @@ class PatientPreprocessing:
         contours_sys: np.ndarray,
         delta_pressure: float,
         delta_time: float = 1,
-        type: str = "rest-stress",
+        mode: str = "rest-stress",
+        plot: bool = False
     ) -> List[float]:
-        lumen_changes = []
-        anisotropy_indices = []
-        pc_ratios = []
-        pc1_vars = []
-        pc2_vars = []
-        pc1_dirs = []
-        pc2_dirs = []
+        
+        eigenvalues_dia_ls = []
+        eigenvalues_sys_ls = []
+        stretch_ls = []
+        stretch_rate_ls = []
+        stiffness_ls = []
+        pc1_length_dia_ls = []
+        pc1_length_sys_ls = []
 
         if contours_dia is None or contours_sys is None:
             logger.warning("Contours data is missing.")
-            return lumen_changes
+            return stretch_ls
 
         # if length is different remove first rows of the longer one
         if contours_dia.shape[0] != contours_sys.shape[0]:
@@ -276,7 +334,7 @@ class PatientPreprocessing:
 
         if not np.array_equal(dia_ids, sys_ids):
             logger.error("Mismatch in contour IDs between diastole and systole")
-            return lumen_changes
+            return stretch_ls
 
         for cid in dia_ids:
             d_pts = contours_dia[contours_dia[:, 0] == cid][:, 1:]
@@ -285,63 +343,54 @@ class PatientPreprocessing:
                 logger.warning(f"Contour {cid} has incorrect point count")
                 continue
 
-            disp = s_pts - d_pts
             try:
-                pca = PCA(n_components=2)
-                pca.fit(disp)
-                pc_vars = pca.explained_variance_
-                pc_ratio = pca.explained_variance_ratio_
-                anisotropy = pc_vars[1] / pc_vars[0]
-                pc1_dir, pc2_dir = pca.components_[:2]
+                _, eigenvalues_dia, _ = self._pca_analysis(d_pts[:,0:2], int(cid), False, f'dia frame {int(cid)}')
+                _, eigenvalues_sys, _ = self._pca_analysis(s_pts[:,0:2], int(cid), False, f'sys frame {int(cid)}')
 
-                if type == "rest-stress":
-                    change = pc_vars.sum() / (delta_pressure * delta_time)
-                    anisotropy_index = anisotropy / (delta_pressure * delta_time)
-                    pc1_var = pc_vars[0] / (delta_pressure * delta_time)
-                    pc2_var = pc_vars[1] / (delta_pressure * delta_time)
-                    pc_ratio = pc_ratio[0] / (delta_pressure * delta_time)
-                    pc1_dir = pc1_dir / (delta_pressure * delta_time)
-                    pc2_dir = pc2_dir / (delta_pressure * delta_time)
-                else:  # dia–dia or sys–sys
-                    change = pc_vars.sum() / delta_pressure
-                    anisotropy_index = anisotropy / delta_pressure
-                    pc1_var = pc_vars[0] / delta_pressure
-                    pc2_var = pc_vars[1] / delta_pressure
-                    pc_ratio = pc_ratio[0] / delta_pressure
-                    pc1_dir = pc1_dir / delta_pressure
-                    pc2_dir = pc2_dir / delta_pressure
-                lumen_changes.append(change)
-                anisotropy_indices.append(anisotropy_index)
-                pc_ratios.append(pc_ratio)
-                pc1_vars.append(pc1_var)
-                pc2_vars.append(pc2_var)
-                pc1_dirs.append(pc1_dir)
-                pc2_dirs.append(pc2_dir)
+                stretch = (eigenvalues_sys[0]/eigenvalues_dia[0])
+                stiffness = (eigenvalues_sys[0]/eigenvalues_dia[0]) / delta_pressure
+
+                if mode == "rest-stress":
+                    stretch_rate = (eigenvalues_sys[0]/eigenvalues_dia[0]) / delta_time
+                    stretch_rate_ls.append(stretch_rate)
+
+                else:
+                    stretch_rate_ls.append(np.nan)
+
+                stretch_ls.append(stretch)
+                stiffness_ls.append(stiffness)
+                pc1_length_dia_ls.append(eigenvalues_dia[0])
+                pc1_length_sys_ls.append(eigenvalues_sys[0])
+
+                if plot:
+                    eigenvalues_dia_ls.append(eigenvalues_dia)
+                    eigenvalues_sys_ls.append(eigenvalues_sys)
+
 
             except Exception as e:
                 logger.error(f"PCA failed for contour {cid}: {e}")
-                lumen_changes.append(np.nan)
-                anisotropy_indices.append(np.nan)
-                pc_ratios.append(np.nan)
-                pc1_vars.append(np.nan)
-                pc2_vars.append(np.nan)
-                pc1_dirs.append(np.nan)
-                pc2_dirs.append(np.nan)
+                stretch_ls.append(np.nan)
+                stretch_rate_ls.append(np.nan)
+                stiffness_ls.append(np.nan)
+                pc1_length_dia_ls.append(np.nan)
+                pc1_length_sys_ls.append(np.nan)
 
         df = pd.DataFrame(
             {
-                "contour_id": range(len(lumen_changes)),
-                "lumen_change": lumen_changes,
-                "anisotropy_index": anisotropy_indices,
-                "pc_ratio": pc_ratios,
-                "pc1_var": pc1_vars,
-                "pc2_var": pc2_vars,
-                "pc1_dir_x": [d[0] for d in pc1_dirs],
-                "pc1_dir_y": [d[1] for d in pc1_dirs],
-                "pc2_dir_x": [d[0] for d in pc2_dirs],
-                "pc2_dir_y": [d[1] for d in pc2_dirs],
+                "contour_id": range(len(stretch_ls)),
+                "pc1_diastole": pc1_length_dia_ls,
+                "pc1_systole": pc1_length_sys_ls,
+                "stretch": stretch_ls,
+                "stretch_rate": stretch_rate_ls,
+                "stiffness": stiffness_ls
             }
         )
+        
+        if plot:
+            _plot_pca(eigenvalues_dia_ls, eigenvalues_sys_ls, dia_ids)
+
+            
+
         return df
 
     def compute_sys_dia_properties(self, phase="rest") -> None:
@@ -588,51 +637,33 @@ class PatientPreprocessing:
                     mean_lumen = np.nan
                     mean_min_dist = np.nan
                     mean_elliptic_ratio = np.nan
-                    mean_pca_glob = np.nan
-                    mean_pca_aniso = np.nan
-                    mean_pca_ratio = np.nan
-                    mean_pca_pc1_var = np.nan
-                    mean_pca_pc2_var = np.nan
-                    mean_pca_pc1_dir_x = np.nan
-                    mean_pca_pc1_dir_y = np.nan
-                    mean_pca_pc2_dir_x = np.nan
-                    mean_pca_pc2_dir_y = np.nan
+                    mean_stretch = np.nan
+                    mean_stretch_rate = np.nan
+                    mean_stiffness = np.nan
+                    mean_pc1_dia = np.nan
+                    mean_pc1_sys = np.nan
+
                 else:
                     mean_lumen = sel["delta_lumen_area"].mean()
                     mean_min_dist = sel["delta_min_dist"].mean()
                     mean_elliptic_ratio = sel["delta_elliptic_ratio"].mean()
-                    mean_pca_glob = sel["lumen_change"].mean()
-                    mean_pca_aniso = sel["anisotropy_index"].mean()
-                    mean_pca_ratio = sel["pc_ratio"].mean()
-                    mean_pca_pc1_var = sel["pc1_var"].mean()
-                    mean_pca_pc2_var = sel["pc2_var"].mean()
-                    mean_pca_pc1_dir_x = sel["pc1_dir_x"].mean()
-                    mean_pca_pc1_dir_y = sel["pc1_dir_y"].mean()
-                    mean_pca_pc2_dir_x = sel["pc2_dir_x"].mean()
-                    mean_pca_pc2_dir_y = sel["pc2_dir_y"].mean()
+                    mean_stretch = sel["stretch"].mean()
+                    mean_stretch_rate = sel["stretch_rate"].mean()
+                    mean_stiffness = sel["stiffness"].mean()
+                    mean_pc1_dia = sel["pc1_diastole"].mean()
+                    mean_pc1_sys = sel["pc1_systole"].mean()
+
                 pct_label = (i + 1) * 20
                 section_stats[f"{phase}_pct_{pct_label}_lumen"] = mean_lumen
                 section_stats[f"{phase}_pct_{pct_label}_min_dist"] = mean_min_dist
                 section_stats[f"{phase}_pct_{pct_label}_ellip_ratio"] = (
                     mean_elliptic_ratio
                 )
-                section_stats[f"{phase}_pct_{pct_label}_pca_glob"] = mean_pca_glob
-                section_stats[f"{phase}_pct_{pct_label}_pca_aniso"] = mean_pca_aniso
-                section_stats[f"{phase}_pct_{pct_label}_pca_ratio"] = mean_pca_ratio
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc1_var"] = mean_pca_pc1_var
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc2_var"] = mean_pca_pc2_var
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc1_dir_x"] = (
-                    mean_pca_pc1_dir_x
-                )
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc1_dir_y"] = (
-                    mean_pca_pc1_dir_y
-                )
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc2_dir_x"] = (
-                    mean_pca_pc2_dir_x
-                )
-                section_stats[f"{phase}_pct_{pct_label}_pca_pc2_dir_y"] = (
-                    mean_pca_pc2_dir_y
-                )
+                section_stats[f"{phase}_pct_{pct_label}_stretch"] = mean_stretch
+                section_stats[f"{phase}_pct_{pct_label}_stretch_rate"] = mean_stretch_rate
+                section_stats[f"{phase}_pct_{pct_label}_stiffness"] = mean_stiffness
+                section_stats[f"{phase}_pct_{pct_label}_pc1_dia"] = mean_pc1_dia
+                section_stats[f"{phase}_pct_{pct_label}_pc1_sys"] = mean_pc1_sys
 
         # 5) Compute MLA positions, clamped
         def clamp(idx, df):
@@ -675,31 +706,22 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_ost": self.df_rest.iloc[ost_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_pca_glob_ost": self.df_rest.iloc[ost_pos_rest][
-                "lumen_change"
+            "pulsatile_rest_stretch_ost": self.df_rest.iloc[ost_pos_rest][
+                "stretch"
             ],
-            "pulsatile_rest_pca_aniso_ost": self.df_rest.iloc[ost_pos_rest][
-                "anisotropy_index"
+            "pulsatile_rest_stretch_rate_ost": self.df_rest.iloc[ost_pos_rest][
+                "stretch_rate"
             ],
-            "pulsatile_rest_pca_ratio_ost": self.df_rest.iloc[ost_pos_rest]["pc_ratio"],
-            "pulsatile_rest_pca_pc1_var_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc1_var"
+            "pulsatile_rest_stiffness_ost": self.df_rest.iloc[ost_pos_rest][
+                "stiffness"
             ],
-            "pulsatile_rest_pca_pc2_var_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc2_var"
+            "pulsatile_rest_pc1_diastole_ost": self.df_rest.iloc[ost_pos_rest][
+                "pc1_diastole"
             ],
-            "pulsatile_rest_pca_pc1_dir_x_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc1_dir_x"
+            "pulsatile_rest_pc1_systole_ost": self.df_rest.iloc[ost_pos_rest][
+                "pc1_systole"
             ],
-            "pulsatile_rest_pca_pc1_dir_y_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc1_dir_y"
-            ],
-            "pulsatile_rest_pca_pc2_dir_x_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc2_dir_x"
-            ],
-            "pulsatile_rest_pca_pc2_dir_y_ost": self.df_rest.iloc[ost_pos_rest][
-                "pc2_dir_y"
-            ],
+            
             "pulsatile_rest_lumen_mla": self.df_rest.iloc[mla_pos_rest][
                 "delta_lumen_area"
             ],
@@ -707,30 +729,20 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_mla": self.df_rest.iloc[mla_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_pca_glob_mla": self.df_rest.iloc[mla_pos_rest][
-                "lumen_change"
+            "pulsatile_rest_stretch_mla": self.df_rest.iloc[mla_pos_rest][
+                "stretch"
             ],
-            "pulsatile_rest_pca_aniso_mla": self.df_rest.iloc[mla_pos_rest][
-                "anisotropy_index"
+            "pulsatile_rest_stretch_rate_mla": self.df_rest.iloc[mla_pos_rest][
+                "stretch_rate"
             ],
-            "pulsatile_rest_pca_ratio_mla": self.df_rest.iloc[mla_pos_rest]["pc_ratio"],
-            "pulsatile_rest_pca_pc1_var_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc1_var"
+            "pulsatile_rest_stiffness_mla": self.df_rest.iloc[mla_pos_rest][
+                "stiffness"
             ],
-            "pulsatile_rest_pca_pc2_var_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc2_var"
+            "pulsatile_rest_pc1_diastole_mla": self.df_rest.iloc[mla_pos_rest][
+                "pc1_diastole"
             ],
-            "pulsatile_rest_pca_pc1_dir_x_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc1_dir_x"
-            ],
-            "pulsatile_rest_pca_pc1_dir_y_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc1_dir_y"
-            ],
-            "pulsatile_rest_pca_pc2_dir_x_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc2_dir_x"
-            ],
-            "pulsatile_rest_pca_pc2_dir_y_mla": self.df_rest.iloc[mla_pos_rest][
-                "pc2_dir_y"
+            "pulsatile_rest_pc1_systole_mla": self.df_rest.iloc[mla_pos_rest][
+                "pc1_systole"
             ],
             "pulsatile_stress_lumen_ost": self.df_stress.iloc[ost_pos_stress][
                 "delta_lumen_area"
@@ -741,32 +753,20 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_ost": self.df_stress.iloc[ost_pos_stress][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_stress_pca_glob_ost": self.df_stress.iloc[ost_pos_stress][
-                "lumen_change"
+            "pulsatile_stress_stretch_ost": self.df_stress.iloc[ost_pos_stress][
+                "stretch"
             ],
-            "pulsatile_stress_pca_aniso_ost": self.df_stress.iloc[ost_pos_stress][
-                "anisotropy_index"
+            "pulsatile_stress_stretch_rate_ost": self.df_stress.iloc[ost_pos_stress][
+                "stretch_rate"
             ],
-            "pulsatile_stress_pca_ratio_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc_ratio"
+            "pulsatile_stress_stiffness_ost": self.df_stress.iloc[ost_pos_stress][
+                "stiffness"
             ],
-            "pulsatile_stress_pca_pc1_var_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc1_var"
+            "pulsatile_stress_pc1_diastole_ost": self.df_stress.iloc[ost_pos_stress][
+                "pc1_diastole"
             ],
-            "pulsatile_stress_pca_pc2_var_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc2_var"
-            ],
-            "pulsatile_stress_pca_pc1_dir_x_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc1_dir_x"
-            ],
-            "pulsatile_stress_pca_pc1_dir_y_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc1_dir_y"
-            ],
-            "pulsatile_stress_pca_pc2_dir_x_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc2_dir_x"
-            ],
-            "pulsatile_stress_pca_pc2_dir_y_ost": self.df_stress.iloc[ost_pos_stress][
-                "pc2_dir_y"
+            "pulsatile_stress_pc1_systole_ost": self.df_stress.iloc[ost_pos_stress][
+                "pc1_systole"
             ],
             "pulsatile_stress_lumen_mla": self.df_stress.iloc[mla_pos_stress][
                 "delta_lumen_area"
@@ -777,32 +777,20 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_mla": self.df_stress.iloc[mla_pos_stress][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_stress_pca_glob_mla": self.df_stress.iloc[mla_pos_stress][
-                "lumen_change"
+            "pulsatile_stress_stretch_mla": self.df_stress.iloc[mla_pos_stress][
+                "stretch"
             ],
-            "pulsatile_stress_pca_aniso_mla": self.df_stress.iloc[mla_pos_stress][
-                "anisotropy_index"
+            "pulsatile_stress_stretch_rate_mla": self.df_stress.iloc[mla_pos_stress][
+                "stretch_rate"
             ],
-            "pulsatile_stress_pca_ratio_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc_ratio"
+            "pulsatile_stress_stiffness_mla": self.df_stress.iloc[mla_pos_stress][
+                "stiffness"
             ],
-            "pulsatile_stress_pca_pc1_var_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc1_var"
+            "pulsatile_stress_pc1_diastole_mla": self.df_stress.iloc[mla_pos_stress][
+                "pc1_diastole"
             ],
-            "pulsatile_stress_pca_pc2_var_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc2_var"
-            ],
-            "pulsatile_stress_pca_pc1_dir_x_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc1_dir_x"
-            ],
-            "pulsatile_stress_pca_pc1_dir_y_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc1_dir_y"
-            ],
-            "pulsatile_stress_pca_pc2_dir_x_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc2_dir_x"
-            ],
-            "pulsatile_stress_pca_pc2_dir_y_mla": self.df_stress.iloc[mla_pos_stress][
-                "pc2_dir_y"
+            "pulsatile_stress_pc1_systole_mla": self.df_stress.iloc[mla_pos_stress][
+                "pc1_systole"
             ],
             "stressind_dia_lumen_ost": self.df_dia.iloc[ost_pos_dia][
                 "delta_lumen_area"
@@ -811,25 +799,14 @@ class PatientPreprocessing:
             "stressind_dia_ellip_ost": self.df_dia.iloc[ost_pos_dia][
                 "delta_elliptic_ratio"
             ],
-            "stressind_dia_pca_glob_ost": self.df_dia.iloc[ost_pos_dia]["lumen_change"],
-            "stressind_dia_pca_aniso_ost": self.df_dia.iloc[ost_pos_dia][
-                "anisotropy_index"
+            "stressind_dia_stretch_ost": self.df_dia.iloc[ost_pos_dia]["stretch"],
+            "stressind_dia_stretch_rate_ost": self.df_dia.iloc[ost_pos_dia][
+                "stretch_rate"
             ],
-            "stressind_dia_pca_ratio_ost": self.df_dia.iloc[ost_pos_dia]["pc_ratio"],
-            "stressind_dia_pca_pc1_var_ost": self.df_dia.iloc[ost_pos_dia]["pc1_var"],
-            "stressind_dia_pca_pc2_var_ost": self.df_dia.iloc[ost_pos_dia]["pc2_var"],
-            "stressind_dia_pca_pc1_dir_x_ost": self.df_dia.iloc[ost_pos_dia][
-                "pc1_dir_x"
-            ],
-            "stressind_dia_pca_pc1_dir_y_ost": self.df_dia.iloc[ost_pos_dia][
-                "pc1_dir_y"
-            ],
-            "stressind_dia_pca_pc2_dir_x_ost": self.df_dia.iloc[ost_pos_dia][
-                "pc2_dir_x"
-            ],
-            "stressind_dia_pca_pc2_dir_y_ost": self.df_dia.iloc[ost_pos_dia][
-                "pc2_dir_y"
-            ],
+            "stressind_dia_stiffness_ost": self.df_dia.iloc[ost_pos_dia]["stiffness"],
+            "stressind_dia_pc1_diastole_ost": self.df_dia.iloc[ost_pos_dia]["pc1_diastole"],
+            "stressind_dia_pc1_systole_ost": self.df_dia.iloc[ost_pos_dia]["pc1_systole"],
+
             "stressind_dia_lumen_mla": self.df_dia.iloc[mla_pos_dia][
                 "delta_lumen_area"
             ],
@@ -837,22 +814,13 @@ class PatientPreprocessing:
             "stressind_dia_ellip_mla": self.df_dia.iloc[mla_pos_dia][
                 "delta_elliptic_ratio"
             ],
-            "stressind_dia_pca_glob_mla": self.df_dia.iloc[mla_pos_dia]["lumen_change"],
-            "stressind_dia_pca_aniso_mla": self.df_dia.iloc[mla_pos_dia][
-                "anisotropy_index"
+            "stressind_dia_stretch_mla": self.df_dia.iloc[mla_pos_dia]["stretch"],
+            "stressind_dia_stretch_rate_mla": self.df_dia.iloc[mla_pos_dia][
+                "stretch_rate"
             ],
-            "stressind_dia_pca_ratio_mla": self.df_dia.iloc[mla_pos_dia]["pc_ratio"],
-            "stressind_dia_pca_pc1_var_mla": self.df_dia.iloc[mla_pos_dia]["pc1_var"],
-            "stressind_dia_pca_pc2_var_mla": self.df_dia.iloc[mla_pos_dia]["pc2_var"],
-            "stressind_dia_pca_pc1_dir_x_mla": self.df_dia.iloc[mla_pos_dia][
-                "pc1_dir_x"
-            ],
-            "stressind_dia_pca_pc1_dir_y_mla": self.df_dia.iloc[mla_pos_dia][
-                "pc1_dir_y"
-            ],
-            "stressind_dia_pca_pc2_dir_x_mla": self.df_dia.iloc[mla_pos_dia][
-                "pc2_dir_x"
-            ],
+            "stressind_dia_stiffness_mla": self.df_dia.iloc[mla_pos_dia]["stiffness"],
+            "stressind_dia_pc1_diastole_mla": self.df_dia.iloc[mla_pos_dia]["pc1_diastole"],
+            "stressind_dia_pc1_systole_mla": self.df_dia.iloc[mla_pos_dia]["pc1_systole"],
             "stressind_sys_lumen_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_lumen_area"
             ],
@@ -860,25 +828,13 @@ class PatientPreprocessing:
             "stressind_sys_ellip_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_elliptic_ratio"
             ],
-            "stressind_sys_pca_glob_ost": self.df_sys.iloc[ost_pos_sys]["lumen_change"],
-            "stressind_sys_pca_aniso_ost": self.df_sys.iloc[ost_pos_sys][
-                "anisotropy_index"
+            "stressind_sys_stretch_ost": self.df_sys.iloc[ost_pos_sys]["stretch"],
+            "stressind_sys_stretch_rate_ost": self.df_sys.iloc[ost_pos_sys][
+                "stretch_rate"
             ],
-            "stressind_sys_pca_ratio_ost": self.df_sys.iloc[ost_pos_sys]["pc_ratio"],
-            "stressind_sys_pca_pc1_var_ost": self.df_sys.iloc[ost_pos_sys]["pc1_var"],
-            "stressind_sys_pca_pc2_var_ost": self.df_sys.iloc[ost_pos_sys]["pc2_var"],
-            "stressind_sys_pca_pc1_dir_x_ost": self.df_sys.iloc[ost_pos_sys][
-                "pc1_dir_x"
-            ],
-            "stressind_sys_pca_pc1_dir_y_ost": self.df_sys.iloc[ost_pos_sys][
-                "pc1_dir_y"
-            ],
-            "stressind_sys_pca_pc2_dir_x_ost": self.df_sys.iloc[ost_pos_sys][
-                "pc2_dir_x"
-            ],
-            "stressind_sys_pca_pc2_dir_y_ost": self.df_sys.iloc[ost_pos_sys][
-                "pc2_dir_y"
-            ],
+            "stressind_sys_stiffness_ost": self.df_sys.iloc[ost_pos_sys]["stiffness"],
+            "stressind_sys_pc1_diastole_ost": self.df_sys.iloc[ost_pos_sys]["pc1_diastole"],
+            "stressind_sys_pc1_systole_ost": self.df_sys.iloc[ost_pos_sys]["pc1_systole"],
             "stressind_sys_lumen_mla": self.df_sys.iloc[mla_pos_sys][
                 "delta_lumen_area"
             ],
@@ -886,25 +842,13 @@ class PatientPreprocessing:
             "stressind_sys_ellip_mla": self.df_sys.iloc[mla_pos_sys][
                 "delta_elliptic_ratio"
             ],
-            "stressind_sys_pca_glob_mla": self.df_sys.iloc[mla_pos_sys]["lumen_change"],
-            "stressind_sys_pca_aniso_mla": self.df_sys.iloc[mla_pos_sys][
-                "anisotropy_index"
+            "stressind_sys_stretch_mla": self.df_sys.iloc[mla_pos_sys]["stretch"],
+            "stressind_sys_stretch_rate_mla": self.df_sys.iloc[mla_pos_sys][
+                "stretch_rate"
             ],
-            "stressind_sys_pca_ratio_mla": self.df_sys.iloc[mla_pos_sys]["pc_ratio"],
-            "stressind_sys_pca_pc1_var_mla": self.df_sys.iloc[mla_pos_sys]["pc1_var"],
-            "stressind_sys_pca_pc2_var_mla": self.df_sys.iloc[mla_pos_sys]["pc2_var"],
-            "stressind_sys_pca_pc1_dir_x_mla": self.df_sys.iloc[mla_pos_sys][
-                "pc1_dir_x"
-            ],
-            "stressind_sys_pca_pc1_dir_y_mla": self.df_sys.iloc[mla_pos_sys][
-                "pc1_dir_y"
-            ],
-            "stressind_sys_pca_pc2_dir_x_mla": self.df_sys.iloc[mla_pos_sys][
-                "pc2_dir_x"
-            ],
-            "stressind_sys_pca_pc2_dir_y_mla": self.df_sys.iloc[mla_pos_sys][
-                "pc2_dir_y"
-            ],
+            "stressind_sys_stiffness_mla": self.df_sys.iloc[mla_pos_sys]["stiffness"],
+            "stressind_sys_pc1_diastole_mla": self.df_sys.iloc[mla_pos_sys]["pc1_diastole"],
+            "stressind_sys_pc1_systole_mla": self.df_sys.iloc[mla_pos_sys]["pc1_systole"],
         }
 
         # 7) Add section stats to the output DataFrame
