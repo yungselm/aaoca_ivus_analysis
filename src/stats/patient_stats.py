@@ -212,7 +212,7 @@ class PatientStats:
             print(f"\nCluster {c} ({len(plist)} patients):\n{plist}")
 
         # --- PCA visualization ---
-        pca = PCA(n_components=2, random_state=42)
+        pca = PCA(n_components=3, random_state=42)
         X_pca = pca.fit_transform(X_scaled)
 
         fig, ax = plt.subplots(figsize=(9, 6))

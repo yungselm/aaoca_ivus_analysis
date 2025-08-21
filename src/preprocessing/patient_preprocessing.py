@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import Dict
 from typing import List
-from typing import Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,7 +13,6 @@ from preprocessing.contour_measurements import calculate_displacement_map
 from preprocessing.contour_measurements import calculate_measurement_map
 from preprocessing.contour_measurements import compute_contour_properties
 from advanced_visualizations.plot_frame_diff import plot_frame_diff
-from sklearn.decomposition import PCA
 from stats.plots import _plot_pca
 
 
@@ -159,9 +157,9 @@ class PatientPreprocessing:
         )
         if plot:
             plot_frame_diff(
-                self.patient_data.rest_contours_dia, 
-                self.patient_data.dia_contours_rest, 
-                self.patient_data.rest_contours_sys, 
+                self.patient_data.rest_contours_dia,
+                self.patient_data.dia_contours_rest,
+                self.patient_data.rest_contours_sys,
                 self.patient_data.sys_contours_rest,
                 self.patient_data.stress_contours_dia,
                 self.patient_data.stress_contours_sys,
@@ -183,7 +181,7 @@ class PatientPreprocessing:
                 dp,
                 dt,
                 mode="rest-stress",
-                plot=False
+                plot=False,
             )
             results["rest"] = df
         # stress
@@ -245,9 +243,9 @@ class PatientPreprocessing:
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
         return results
-    
+
     @staticmethod
-    def _pca_analysis(xy_spline, z, plot=False, title_str=''):
+    def _pca_analysis(xy_spline, z, plot=False, title_str=""):
         """
         Principal component analysis of the 2D lumen contour
 
@@ -257,13 +255,13 @@ class PatientPreprocessing:
 
         -Return-
         eigenvectors: as np.array of shape (2,2) with each eigenvector as column vector
-        eigenvalues: as np.array of shape (2,)    
+        eigenvalues: as np.array of shape (2,)
         """
-        
+
         centroid = np.mean(xy_spline, axis=0)
         centroid_3d = np.append(centroid, z)
 
-        centered_data = xy_spline-centroid
+        centered_data = xy_spline - centroid
 
         cov_matrix = np.cov(centered_data, rowvar=False)
 
@@ -273,29 +271,45 @@ class PatientPreprocessing:
         eigenvalues = eigenvalues[idx]
         eigenvectors = eigenvectors[:, idx]
 
-        # only for debugging 
-        if plot:    
-            plt.figure(figsize=(6,6))
-            plt.plot(xy_spline[:,0], xy_spline[:,1], label=f'Contour z={z}')
-            plt.scatter(*centroid, color='red', label='Centroid')
-            plt.quiver(centroid[0],centroid[1],1,0,label=r'$e_x$', scale_units='xy', scale=1)
-            plt.quiver(centroid[0],centroid[1],0,1,label=r'$e_y$', scale_units='xy', scale=1)
+        # only for debugging
+        if plot:
+            plt.figure(figsize=(6, 6))
+            plt.plot(xy_spline[:, 0], xy_spline[:, 1], label=f"Contour z={z}")
+            plt.scatter(*centroid, color="red", label="Centroid")
+            plt.quiver(
+                centroid[0],
+                centroid[1],
+                1,
+                0,
+                label=r"$e_x$",
+                scale_units="xy",
+                scale=1,
+            )
+            plt.quiver(
+                centroid[0],
+                centroid[1],
+                0,
+                1,
+                label=r"$e_y$",
+                scale_units="xy",
+                scale=1,
+            )
 
-            scale = 1 
+            scale = 1
             for i in range(2):
                 vec = eigenvectors[:, i]
                 plt.plot(
                     [centroid[0], centroid[0] + scale * vec[0]],
                     [centroid[1], centroid[1] + scale * vec[1]],
-                    label=f'PC{i+1}'
+                    label=f"PC{i+1}",
                 )
 
-            plt.axis('equal')
-            plt.legend(loc='upper right')
+            plt.axis("equal")
+            plt.legend(loc="upper right")
             plt.title(f"PCA of {title_str}")
             plt.show()
 
-            print(f'{title_str}, PC1: {eigenvalues[0]}, PC2: {eigenvalues[1]}')
+            print(f"{title_str}, PC1: {eigenvalues[0]}, PC2: {eigenvalues[1]}")
 
         return eigenvectors, eigenvalues, centroid_3d
 
@@ -306,9 +320,9 @@ class PatientPreprocessing:
         delta_pressure: float,
         delta_time: float = 1,
         mode: str = "rest-stress",
-        plot: bool = False
+        plot: bool = False,
     ) -> List[float]:
-        
+
         eigenvalues_dia_ls = []
         eigenvalues_sys_ls = []
         stretch_ls = []
@@ -344,14 +358,20 @@ class PatientPreprocessing:
                 continue
 
             try:
-                _, eigenvalues_dia, _ = self._pca_analysis(d_pts[:,0:2], int(cid), False, f'dia frame {int(cid)}')
-                _, eigenvalues_sys, _ = self._pca_analysis(s_pts[:,0:2], int(cid), False, f'sys frame {int(cid)}')
+                _, eigenvalues_dia, _ = self._pca_analysis(
+                    d_pts[:, 0:2], int(cid), False, f"dia frame {int(cid)}"
+                )
+                _, eigenvalues_sys, _ = self._pca_analysis(
+                    s_pts[:, 0:2], int(cid), False, f"sys frame {int(cid)}"
+                )
 
-                stretch = (eigenvalues_sys[0]/eigenvalues_dia[0])
-                stiffness = (eigenvalues_sys[0]/eigenvalues_dia[0]) / delta_pressure
+                stretch = eigenvalues_sys[0] / eigenvalues_dia[0]
+                stiffness = (eigenvalues_sys[0] / eigenvalues_dia[0]) / delta_pressure
 
                 if mode == "rest-stress":
-                    stretch_rate = (eigenvalues_sys[0]/eigenvalues_dia[0]) / delta_time
+                    stretch_rate = (
+                        eigenvalues_sys[0] / eigenvalues_dia[0]
+                    ) / delta_time
                     stretch_rate_ls.append(stretch_rate)
 
                 else:
@@ -365,7 +385,6 @@ class PatientPreprocessing:
                 if plot:
                     eigenvalues_dia_ls.append(eigenvalues_dia)
                     eigenvalues_sys_ls.append(eigenvalues_sys)
-
 
             except Exception as e:
                 logger.error(f"PCA failed for contour {cid}: {e}")
@@ -382,14 +401,12 @@ class PatientPreprocessing:
                 "pc1_systole": pc1_length_sys_ls,
                 "stretch": stretch_ls,
                 "stretch_rate": stretch_rate_ls,
-                "stiffness": stiffness_ls
+                "stiffness": stiffness_ls,
             }
         )
-        
+
         if plot:
             _plot_pca(eigenvalues_dia_ls, eigenvalues_sys_ls, dia_ids)
-
-            
 
         return df
 
@@ -421,7 +438,7 @@ class PatientPreprocessing:
             dp, dt = (
                 self.patient_data.pressure_stress[0]
                 - self.patient_data.pressure_rest[0],
-                1, # No time change for dia-dia
+                1,  # No time change for dia-dia
             )
         elif phase == "sys_sys":
             dia, sys = (
@@ -431,10 +448,12 @@ class PatientPreprocessing:
             dp, dt = (
                 self.patient_data.pressure_stress[1]
                 - self.patient_data.pressure_rest[1],
-                1, # No time change for sys-sys
+                1,  # No time change for sys-sys
             )
         else:
-            logger.error(f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'")
+            logger.error(
+                f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'"
+            )
 
         p_dia = compute_contour_properties(dia)
         p_sys = compute_contour_properties(sys)
@@ -496,7 +515,7 @@ class PatientPreprocessing:
                     "elliptic_ratio_sys_rest": p_dia[:, 5],
                     "elliptic_ratio_sys_stress": p_sys[:, 5],
                 }
-            )            
+            )
 
         in_path = os.path.join(self.output_dir, f"{phase}_lumen_changes.csv")
         if os.path.exists(in_path):
@@ -512,7 +531,9 @@ class PatientPreprocessing:
             elif phase == "sys_sys":
                 self.df_sys = df
             else:
-                logger.error(f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'")
+                logger.error(
+                    f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'"
+                )
         else:
             logger.warning(f"Missing file: {in_path}")
 
@@ -660,7 +681,9 @@ class PatientPreprocessing:
                     mean_elliptic_ratio
                 )
                 section_stats[f"{phase}_pct_{pct_label}_stretch"] = mean_stretch
-                section_stats[f"{phase}_pct_{pct_label}_stretch_rate"] = mean_stretch_rate
+                section_stats[f"{phase}_pct_{pct_label}_stretch_rate"] = (
+                    mean_stretch_rate
+                )
                 section_stats[f"{phase}_pct_{pct_label}_stiffness"] = mean_stiffness
                 section_stats[f"{phase}_pct_{pct_label}_pc1_dia"] = mean_pc1_dia
                 section_stats[f"{phase}_pct_{pct_label}_pc1_sys"] = mean_pc1_sys
@@ -706,9 +729,15 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_ost": self.df_rest.iloc[ost_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_stretch_ost": self.df_rest.iloc[ost_pos_rest][
-                "stretch"
-            ],
+            "pulsatile_rest_lumen_percent_ost": self.df_rest.iloc[ost_pos_rest][
+                "lumen_area_sys"
+            ]
+            / self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"],
+            "pulsatile_rest_min_percent_ost": self.df_rest.iloc[ost_pos_rest][
+                "min_dist_sys"
+            ]
+            / self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
+            "pulsatile_rest_stretch_ost": self.df_rest.iloc[ost_pos_rest]["stretch"],
             "pulsatile_rest_stretch_rate_ost": self.df_rest.iloc[ost_pos_rest][
                 "stretch_rate"
             ],
@@ -721,7 +750,6 @@ class PatientPreprocessing:
             "pulsatile_rest_pc1_systole_ost": self.df_rest.iloc[ost_pos_rest][
                 "pc1_systole"
             ],
-            
             "pulsatile_rest_lumen_mla": self.df_rest.iloc[mla_pos_rest][
                 "delta_lumen_area"
             ],
@@ -729,9 +757,15 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_mla": self.df_rest.iloc[mla_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_stretch_mla": self.df_rest.iloc[mla_pos_rest][
-                "stretch"
-            ],
+            "pulsatile_rest_lumen_percent_mla": self.df_rest.iloc[mla_pos_rest][
+                "lumen_area_sys"
+            ]
+            / self.df_rest.iloc[mla_pos_rest]["lumen_area_dia"],
+            "pulsatile_rest_min_percent_mla": self.df_rest.iloc[mla_pos_rest][
+                "min_dist_sys"
+            ]
+            / self.df_rest.iloc[mla_pos_rest]["min_dist_dia"],
+            "pulsatile_rest_stretch_mla": self.df_rest.iloc[mla_pos_rest]["stretch"],
             "pulsatile_rest_stretch_rate_mla": self.df_rest.iloc[mla_pos_rest][
                 "stretch_rate"
             ],
@@ -753,6 +787,14 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_ost": self.df_stress.iloc[ost_pos_stress][
                 "delta_elliptic_ratio"
             ],
+            "pulsatile_stress_lumen_percent_ost": self.df_stress.iloc[ost_pos_stress][
+                "lumen_area_sys"
+            ]
+            / self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
+            "pulsatile_stress_min_percent_ost": self.df_stress.iloc[ost_pos_stress][
+                "min_dist_sys"
+            ]
+            / self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
             "pulsatile_stress_stretch_ost": self.df_stress.iloc[ost_pos_stress][
                 "stretch"
             ],
@@ -777,6 +819,14 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_mla": self.df_stress.iloc[mla_pos_stress][
                 "delta_elliptic_ratio"
             ],
+            "pulsatile_stress_lumen_percent_mla": self.df_stress.iloc[mla_pos_stress][
+                "lumen_area_sys"
+            ]
+            / self.df_stress.iloc[mla_pos_stress]["lumen_area_dia"],
+            "pulsatile_stress_min_percent_mla": self.df_stress.iloc[mla_pos_stress][
+                "min_dist_sys"
+            ]
+            / self.df_stress.iloc[mla_pos_stress]["min_dist_dia"],
             "pulsatile_stress_stretch_mla": self.df_stress.iloc[mla_pos_stress][
                 "stretch"
             ],
@@ -799,14 +849,25 @@ class PatientPreprocessing:
             "stressind_dia_ellip_ost": self.df_dia.iloc[ost_pos_dia][
                 "delta_elliptic_ratio"
             ],
+            "stressind_dia_lumen_percent_ost": self.df_dia.iloc[ost_pos_dia][
+                "lumen_area_sys_rest"
+            ]
+            / self.df_dia.iloc[ost_pos_dia]["lumen_area_sys_stress"],
+            "stressind_dia_min_percent_ost": self.df_dia.iloc[ost_pos_dia][
+                "min_dist_sys_rest"
+            ]
+            / self.df_dia.iloc[ost_pos_dia]["min_dist_sys_stress"],
             "stressind_dia_stretch_ost": self.df_dia.iloc[ost_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_ost": self.df_dia.iloc[ost_pos_dia][
                 "stretch_rate"
             ],
             "stressind_dia_stiffness_ost": self.df_dia.iloc[ost_pos_dia]["stiffness"],
-            "stressind_dia_pc1_diastole_ost": self.df_dia.iloc[ost_pos_dia]["pc1_diastole"],
-            "stressind_dia_pc1_systole_ost": self.df_dia.iloc[ost_pos_dia]["pc1_systole"],
-
+            "stressind_dia_pc1_diastole_ost": self.df_dia.iloc[ost_pos_dia][
+                "pc1_diastole"
+            ],
+            "stressind_dia_pc1_systole_ost": self.df_dia.iloc[ost_pos_dia][
+                "pc1_systole"
+            ],
             "stressind_dia_lumen_mla": self.df_dia.iloc[mla_pos_dia][
                 "delta_lumen_area"
             ],
@@ -814,13 +875,25 @@ class PatientPreprocessing:
             "stressind_dia_ellip_mla": self.df_dia.iloc[mla_pos_dia][
                 "delta_elliptic_ratio"
             ],
+            "stressind_dia_lumen_percent_mla": self.df_dia.iloc[mla_pos_dia][
+                "lumen_area_dia_rest"
+            ]
+            / self.df_dia.iloc[mla_pos_dia]["lumen_area_dia_stress"],
+            "stressind_dia_min_percent_mla": self.df_dia.iloc[mla_pos_dia][
+                "min_dist_dia_rest"
+            ]
+            / self.df_dia.iloc[mla_pos_dia]["min_dist_dia_stress"],
             "stressind_dia_stretch_mla": self.df_dia.iloc[mla_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_mla": self.df_dia.iloc[mla_pos_dia][
                 "stretch_rate"
             ],
             "stressind_dia_stiffness_mla": self.df_dia.iloc[mla_pos_dia]["stiffness"],
-            "stressind_dia_pc1_diastole_mla": self.df_dia.iloc[mla_pos_dia]["pc1_diastole"],
-            "stressind_dia_pc1_systole_mla": self.df_dia.iloc[mla_pos_dia]["pc1_systole"],
+            "stressind_dia_pc1_diastole_mla": self.df_dia.iloc[mla_pos_dia][
+                "pc1_diastole"
+            ],
+            "stressind_dia_pc1_systole_mla": self.df_dia.iloc[mla_pos_dia][
+                "pc1_systole"
+            ],
             "stressind_sys_lumen_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_lumen_area"
             ],
@@ -828,13 +901,25 @@ class PatientPreprocessing:
             "stressind_sys_ellip_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_elliptic_ratio"
             ],
+            "stressind_dia_lumen_percent_ost": self.df_sys.iloc[ost_pos_sys][
+                "lumen_area_sys_rest"
+            ]
+            / self.df_sys.iloc[ost_pos_sys]["lumen_area_sys_stress"],
+            "stressind_dia_min_percent_ost": self.df_sys.iloc[ost_pos_sys][
+                "min_dist_sys_rest"
+            ]
+            / self.df_sys.iloc[ost_pos_sys]["max_dist_sys_stress"],
             "stressind_sys_stretch_ost": self.df_sys.iloc[ost_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_ost": self.df_sys.iloc[ost_pos_sys][
                 "stretch_rate"
             ],
             "stressind_sys_stiffness_ost": self.df_sys.iloc[ost_pos_sys]["stiffness"],
-            "stressind_sys_pc1_diastole_ost": self.df_sys.iloc[ost_pos_sys]["pc1_diastole"],
-            "stressind_sys_pc1_systole_ost": self.df_sys.iloc[ost_pos_sys]["pc1_systole"],
+            "stressind_sys_pc1_diastole_ost": self.df_sys.iloc[ost_pos_sys][
+                "pc1_diastole"
+            ],
+            "stressind_sys_pc1_systole_ost": self.df_sys.iloc[ost_pos_sys][
+                "pc1_systole"
+            ],
             "stressind_sys_lumen_mla": self.df_sys.iloc[mla_pos_sys][
                 "delta_lumen_area"
             ],
@@ -842,13 +927,25 @@ class PatientPreprocessing:
             "stressind_sys_ellip_mla": self.df_sys.iloc[mla_pos_sys][
                 "delta_elliptic_ratio"
             ],
+            "stressind_sys_lumen_percent_mla": self.df_sys.iloc[mla_pos_sys][
+                "lumen_area_sys_rest"
+            ]
+            / self.df_sys.iloc[mla_pos_sys]["lumen_area_sys_stress"],
+            "stressind_sys_min_percent_mla": self.df_sys.iloc[mla_pos_sys][
+                "min_dist_sys_rest"
+            ]
+            / self.df_sys.iloc[mla_pos_sys]["max_dist_sys_stress"],
             "stressind_sys_stretch_mla": self.df_sys.iloc[mla_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_mla": self.df_sys.iloc[mla_pos_sys][
                 "stretch_rate"
             ],
             "stressind_sys_stiffness_mla": self.df_sys.iloc[mla_pos_sys]["stiffness"],
-            "stressind_sys_pc1_diastole_mla": self.df_sys.iloc[mla_pos_sys]["pc1_diastole"],
-            "stressind_sys_pc1_systole_mla": self.df_sys.iloc[mla_pos_sys]["pc1_systole"],
+            "stressind_sys_pc1_diastole_mla": self.df_sys.iloc[mla_pos_sys][
+                "pc1_diastole"
+            ],
+            "stressind_sys_pc1_systole_mla": self.df_sys.iloc[mla_pos_sys][
+                "pc1_systole"
+            ],
         }
 
         # 7) Add section stats to the output DataFrame
