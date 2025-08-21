@@ -22,7 +22,7 @@ def _create_summary_displacement(path: Path) -> dict:
     bin_0 … bin_9 (filling missing ones with NaN), and collects them.
     In the end, returns a dict of 4 DataFrames (one per phase), where each
     output DataFrame has the same shape as an individual CSV and each cell is
-    the mean across that cell’s values over all folders—ignoring NaNs.
+    the mean across that cell's values over all folders—ignoring NaNs.
     """
     # We want exactly bin_0 ... bin_9
     required_bins = [f"bin_{i}" for i in range(10)]
@@ -73,7 +73,7 @@ def _create_summary_displacement(path: Path) -> dict:
     def _average_cellwise_ignore_nan(df_list: list[pd.DataFrame]) -> pd.DataFrame:
         """
         Given a list of DataFrames (all the same shape, same index & columns),
-        stack them vertically, then group by row‐index and take mean (skipna=True).
+        stack them vertically, then group by row-index and take mean (skipna=True).
         Returns a DataFrame of shape (n_rows, 11) with each cell = mean over
         that cell across all DataFrames, ignoring NaNs.
         """

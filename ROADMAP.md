@@ -22,6 +22,7 @@
 - [] Pulsatile as predictor for FFR/iFR <=0.8
 - [] Pulsatile in combination with anatomical for prediction
 - [] Vessels with more dynamic more often relevant?
+- [] Automatically identified MLA better diagnostic performance?
 
 ## Phase 4: Advanced Visualizations
 - [x] Load in png with deformation information from Rust program, summarize pixels to degree groups bin into 20 percent of intramural get the values of all patients summarize in a heatmap
