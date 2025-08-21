@@ -26,5 +26,5 @@
 
 ## Phase 4: Advanced Visualizations
 - [x] Load in png with deformation information from Rust program, summarize pixels to degree groups bin into 20 percent of intramural get the values of all patients summarize in a heatmap
-- [] Add subplot to deformation map with box plots/violing plots for area below per bin 
+- [x] Add subplot to deformation map with box plots/violing plots for area below per bin 
 - [] Video of a point moving over a pressure curve in realtime.
