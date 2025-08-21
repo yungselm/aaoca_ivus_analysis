@@ -23,7 +23,7 @@ class PatientStats:
         self.data = self.load_patient_data()
 
     def run(self):
-        self.kmeans_clustering()
+        self.kmeans_clustering(n_clusters=3)
 
     def load_patient_data(self) -> pd.DataFrame:
         """

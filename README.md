@@ -1,7 +1,7 @@
 # AAOCA IVUS Analysis
 
 ## Overview
-This project is analysis arranged IVUS images from ["aaoca_compression_simulation"](https://github.com/yungselm/aaoca_compression_simulation) and pressure data from ["pressure_curve_processing"](https://github.com/AI-in-Cardiovascular-Medicine/AIVUS-CAA) and analysis pathophysiology behind lumen deformation.
+This project contains the analysis for the paper [...] by using arranged 3D IVUS images from ["AIVUS-CAA"](https://github.com/AI-in-Cardiovascular-Medicine/AIVUS-CAA) and ["multimodars"](https://github.com/yungselm/multimodars) and pressure data from ["pressure_curve_processing"](https://github.com/yungselm/pressure_curve_processing) and analyses pathophysiology behind lumen deformation.
 
 ## Structure
 ```plaintext
@@ -39,4 +39,5 @@ source .venv/bin/activate
 ```
 3.  Install dependencies:
 `uv pip install -e .`
-4. Run the project: `streamlit run src/main.py`
+
+4. Run the project: `python src/main.py`
