@@ -850,13 +850,13 @@ class PatientPreprocessing:
                 "delta_elliptic_ratio"
             ],
             "stressind_dia_lumen_percent_ost": self.df_dia.iloc[ost_pos_dia][
-                "lumen_area_sys_rest"
+                "lumen_area_dia_rest"
             ]
-            / self.df_dia.iloc[ost_pos_dia]["lumen_area_sys_stress"],
+            / self.df_dia.iloc[ost_pos_dia]["lumen_area_dia_stress"],
             "stressind_dia_min_percent_ost": self.df_dia.iloc[ost_pos_dia][
-                "min_dist_sys_rest"
+                "min_dist_dia_rest"
             ]
-            / self.df_dia.iloc[ost_pos_dia]["min_dist_sys_stress"],
+            / self.df_dia.iloc[ost_pos_dia]["min_dist_dia_stress"],
             "stressind_dia_stretch_ost": self.df_dia.iloc[ost_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_ost": self.df_dia.iloc[ost_pos_dia][
                 "stretch_rate"
