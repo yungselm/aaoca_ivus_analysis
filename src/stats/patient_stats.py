@@ -15,6 +15,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
+from scipy.stats import ranksums
+from scipy.stats import shapiro
+from scipy.stats import ttest_ind
+from scipy.stats import levene
 
 class PatientStats:
     def __init__(self, input_dir: str, output_path: str):
@@ -23,7 +27,11 @@ class PatientStats:
         self.data = self.load_patient_data()
 
     def run(self):
-        self.kmeans_clustering()
+        ffr_df = self.pairwise_pressure_split("ffr_pos")
+        ifr_df = self.pairwise_pressure_split("ifr_pos")
+        print(ffr_df)
+        print(ifr_df)
+        # self.kmeans_clustering(3)
 
     def load_patient_data(self) -> pd.DataFrame:
         """
@@ -61,6 +69,173 @@ class PatientStats:
         data["ifr_pos"] = np.where(data["iFR_mean_dobu"] <= 0.8, 1, 0)
 
         return data
+
+    def pairwise_pressure_split(
+        self,
+        split_var: str = "ffr_pos",
+        min_n: int = 6,
+        save: bool = True,
+        apply_fdr: bool = True,
+        out_dir: str | None = None,
+    ):
+        """
+        Compare numeric metrics between groups defined by `split_var` (expects binary 0/1).
+        - split_var: column name containing 0/1 to split dataset
+        - min_n: minimum samples per group to run a comparison
+        - save: whether to save CSV to disk
+        - apply_fdr: whether to apply Benjamini-Hochberg correction across tested metrics
+        - out_dir: override output directory (defaults to self.output_path)
+        """
+
+        # ---- validations ----
+        if split_var not in self.data.columns:
+            logger.error(f"Split variable '{split_var}' not found in dataset")
+            return
+
+        # Ensure groups are 0/1; treat any non-zero as 1
+        self.data["_split_bin"] = self.data[split_var].apply(lambda x: 1 if x == 1 else 0)
+
+        group_pos = self.data[self.data["_split_bin"] == 1]
+        group_neg = self.data[self.data["_split_bin"] == 0]
+
+        logger.info(f"Group sizes - {split_var}=1: {len(group_pos)}, {split_var}=0: {len(group_neg)}")
+
+        # ---- build metric list: numeric only, exclude IDs/flags ----
+        exclude = {"patient_id", "ffr_pos", "ifr_pos", split_var, "_split_bin"}
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns
+        metrics = [c for c in numeric_cols if c not in exclude]
+
+        results = []
+
+        # helper: BH correction later
+        def bh_adjust(pvals):
+            """Benjamini-Hochberg FDR (returns adjusted p-values in original order)."""
+            pvals = np.array(pvals)
+            n = len(pvals)
+            order = np.argsort(pvals)
+            ranked = np.empty(n, dtype=float)
+            cummin = 1.0
+            for i, idx in enumerate(order[::-1], start=1):
+                rank = n - i + 1
+                adj = (pvals[idx] * n) / rank
+                cummin = min(cummin, adj)
+                ranked[idx] = cummin
+            # cap at 1.0
+            ranked = np.minimum(ranked, 1.0)
+            return ranked
+
+        for metric in metrics:
+            # coerce to numeric and drop NA
+            data_pos = pd.to_numeric(group_pos[metric], errors="coerce").dropna()
+            data_neg = pd.to_numeric(group_neg[metric], errors="coerce").dropna()
+
+            n_pos = len(data_pos)
+            n_neg = len(data_neg)
+
+            if n_pos < min_n or n_neg < min_n:
+                logger.debug(
+                    f"Skipping {metric}: insufficient samples ({split_var}=1:{n_pos}, {split_var}=0:{n_neg})"
+                )
+                continue
+
+            # Normality (Shapiro) — only run if sample size is within shapiro's valid range;
+            # wrap in try/except to be robust
+            normal_pos = normal_neg = False
+            try:
+                if 3 <= n_pos <= 5000:
+                    _, p_sh_pos = shapiro(data_pos)
+                    normal_pos = p_sh_pos > 0.05
+                else:
+                    # too small or large for a reliable Shapiro result; be conservative and skip normal assumption
+                    normal_pos = False
+
+                if 3 <= n_neg <= 5000:
+                    _, p_sh_neg = shapiro(data_neg)
+                    normal_neg = p_sh_neg > 0.05
+                else:
+                    normal_neg = False
+            except Exception as e:
+                logger.warning(f"Shapiro normality test failed for {metric}: {e}")
+                normal_pos = normal_neg = False
+
+            # Choose test:
+            if normal_pos and normal_neg:
+                # check variance equality
+                try:
+                    _, p_levene = levene(data_pos, data_neg)
+                    equal_var = p_levene > 0.05
+                except Exception:
+                    equal_var = False
+                stat, pval = ttest_ind(data_pos, data_neg, equal_var=equal_var)
+                test_used = "t-test"
+                # Cohen's d (pooled)
+                pooled_sd = np.sqrt(
+                    ((n_pos - 1) * np.var(data_pos, ddof=1) + (n_neg - 1) * np.var(data_neg, ddof=1))
+                    / (n_pos + n_neg - 2)
+                )
+                effect_size = (np.mean(data_pos) - np.mean(data_neg)) / pooled_sd if pooled_sd != 0 else np.nan
+            else:
+                # non-parametric
+                stat, pval = ranksums(data_pos, data_neg)  # returns z-statistic and p-value
+                test_used = "ranksums"
+                z_stat = stat
+                effect_size = z_stat / np.sqrt(n_pos + n_neg)  # r-like effect size
+
+            # summary stats: medians & MAD (robust)
+            pos_median = np.median(data_pos)
+            neg_median = np.median(data_neg)
+            pos_mad = np.median(np.abs(data_pos - pos_median))
+            neg_mad = np.median(np.abs(data_neg - neg_median))
+
+            results.append(
+                {
+                    "metric": metric,
+                    f"{split_var}_1_n": n_pos,
+                    f"{split_var}_1_median": pos_median,
+                    f"{split_var}_1_mad": pos_mad,
+                    f"{split_var}_0_n": n_neg,
+                    f"{split_var}_0_median": neg_median,
+                    f"{split_var}_0_mad": neg_mad,
+                    "statistic": float(stat),
+                    "p_value": float(pval),
+                    "test": test_used,
+                    "effect_size": float(effect_size) if np.isfinite(effect_size) else np.nan,
+                }
+            )
+
+        # assemble dataframe
+        results_df = pd.DataFrame(results)
+
+        if results_df.empty:
+            logger.warning("No metrics passed filters; no results generated.")
+            # cleanup helper column
+            self.data.drop(columns=["_split_bin"], inplace=True, errors="ignore")
+            return
+
+        # multiple testing correction (optional)
+        if apply_fdr and "p_value" in results_df.columns:
+            results_df["p_adj"] = bh_adjust(results_df["p_value"].values)
+            results_df["significant_fdr"] = results_df["p_adj"] < 0.05
+        else:
+            results_df["p_adj"] = results_df["p_value"]
+            results_df["significant_fdr"] = results_df["p_adj"] < 0.05
+
+        # persist into the instance and optionally to disk
+        attr_name = f"{split_var}_comparison"
+        setattr(self, attr_name, results_df)
+
+        if save:
+            out_dir = out_dir or getattr(self, "output_path", ".")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{split_var}_comparison.csv")
+            results_df.to_csv(out_path, index=False)
+            logger.success(f"Saved {len(results_df)} comparisons to {out_path}")
+
+        # cleanup helper column
+        self.data.drop(columns=["_split_bin"], inplace=True, errors="ignore")
+
+        return results_df
+
 
     def process_local_patient_data(self) -> pd.DataFrame:
         pass
