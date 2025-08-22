@@ -20,6 +20,10 @@ from scipy.stats import shapiro
 from scipy.stats import ttest_ind
 from scipy.stats import levene
 
+import statsmodels.api as sm
+from statsmodels.stats.multitest import multipletests
+
+
 class PatientStats:
     def __init__(self, input_dir: str, output_path: str):
         self.input_dir = input_dir
@@ -31,6 +35,7 @@ class PatientStats:
         ifr_df = self.pairwise_pressure_split("ifr_pos")
         print(ffr_df)
         print(ifr_df)
+        self.run_linear_pairwise()
         # self.kmeans_clustering(3)
 
     def load_patient_data(self) -> pd.DataFrame:
@@ -93,12 +98,16 @@ class PatientStats:
             return
 
         # Ensure groups are 0/1; treat any non-zero as 1
-        self.data["_split_bin"] = self.data[split_var].apply(lambda x: 1 if x == 1 else 0)
+        self.data["_split_bin"] = self.data[split_var].apply(
+            lambda x: 1 if x == 1 else 0
+        )
 
         group_pos = self.data[self.data["_split_bin"] == 1]
         group_neg = self.data[self.data["_split_bin"] == 0]
 
-        logger.info(f"Group sizes - {split_var}=1: {len(group_pos)}, {split_var}=0: {len(group_neg)}")
+        logger.info(
+            f"Group sizes - {split_var}=1: {len(group_pos)}, {split_var}=0: {len(group_neg)}"
+        )
 
         # ---- build metric list: numeric only, exclude IDs/flags ----
         exclude = {"patient_id", "ffr_pos", "ifr_pos", split_var, "_split_bin"}
@@ -170,13 +179,22 @@ class PatientStats:
                 test_used = "t-test"
                 # Cohen's d (pooled)
                 pooled_sd = np.sqrt(
-                    ((n_pos - 1) * np.var(data_pos, ddof=1) + (n_neg - 1) * np.var(data_neg, ddof=1))
+                    (
+                        (n_pos - 1) * np.var(data_pos, ddof=1)
+                        + (n_neg - 1) * np.var(data_neg, ddof=1)
+                    )
                     / (n_pos + n_neg - 2)
                 )
-                effect_size = (np.mean(data_pos) - np.mean(data_neg)) / pooled_sd if pooled_sd != 0 else np.nan
+                effect_size = (
+                    (np.mean(data_pos) - np.mean(data_neg)) / pooled_sd
+                    if pooled_sd != 0
+                    else np.nan
+                )
             else:
                 # non-parametric
-                stat, pval = ranksums(data_pos, data_neg)  # returns z-statistic and p-value
+                stat, pval = ranksums(
+                    data_pos, data_neg
+                )  # returns z-statistic and p-value
                 test_used = "ranksums"
                 z_stat = stat
                 effect_size = z_stat / np.sqrt(n_pos + n_neg)  # r-like effect size
@@ -199,7 +217,9 @@ class PatientStats:
                     "statistic": float(stat),
                     "p_value": float(pval),
                     "test": test_used,
-                    "effect_size": float(effect_size) if np.isfinite(effect_size) else np.nan,
+                    "effect_size": (
+                        float(effect_size) if np.isfinite(effect_size) else np.nan
+                    ),
                 }
             )
 
@@ -236,6 +256,205 @@ class PatientStats:
 
         return results_df
 
+    def run_linear_pairwise(self):
+        # --- outcomes (the stressind variables you originally asked about) ---
+        outcomes = [
+            "stressind_dia_lumen_percent_ost",
+            "stressind_dia_min_percent_ost",
+            "stressind_sys_lumen_percent_ost",
+            "stressind_sys_min_percent_ost",
+            "stressind_dia_lumen_percent_mla",
+            "stressind_dia_min_percent_mla",
+            "stressind_sys_lumen_percent_mla",
+            "stressind_sys_min_percent_mla",
+        ]
+
+        # --- predictors (long list you provided) ---
+        predictors = [
+            "mean_intramural_length",
+            "pressure_change_pulsatile_rest",
+            "time_change_pulsatile_rest",
+            "pressure_change_pulsatile_stress",
+            "time_change_pulsatile_stress",
+            "pressure_change_stressind_dia",
+            "pressure_change_stressind_sys",
+            "pulsatile_rest_lumen_ost",
+            "pulsatile_rest_min_ost",
+            "pulsatile_rest_ellip_ost",
+            "pulsatile_rest_stretch_ost",
+            "pulsatile_rest_stretch_rate_ost",
+            "pulsatile_rest_stiffness_ost",
+            "pulsatile_rest_pc1_diastole_ost",
+            "pulsatile_rest_pct_20_min_dist",
+            "pulsatile_rest_pct_20_ellip_ratio",
+            "pulsatile_rest_pct_20_stretch",
+            "pulsatile_rest_pct_20_stretch_rate",
+            "pulsatile_rest_pct_20_stiffness",
+            "pulsatile_rest_pct_20_pc1_dia",
+            "pulsatile_rest_pct_20_pc1_sys",
+            "pulsatile_rest_pct_40_lumen",
+            "pulsatile_rest_pct_40_min_dist",
+            "pulsatile_rest_pct_40_ellip_ratio",
+            "pulsatile_rest_pct_40_stretch",
+            "pulsatile_rest_pct_40_stretch_rate",
+            "pulsatile_rest_pct_40_stiffness",
+            "pulsatile_rest_pct_40_pc1_dia",
+            "pulsatile_rest_pct_40_pc1_sys",
+            "pulsatile_rest_pct_60_lumen",
+            "pulsatile_rest_pct_60_min_dist",
+            "pulsatile_rest_pct_60_ellip_ratio",
+            "pulsatile_rest_pct_60_stretch",
+            "pulsatile_rest_pct_60_stretch_rate",
+            "pulsatile_rest_pct_60_stiffness",
+            "pulsatile_rest_pct_60_pc1_dia",
+            "pulsatile_rest_pct_60_pc1_sys",
+            "pulsatile_rest_pct_80_lumen",
+            "pulsatile_rest_pct_80_min_dist",
+            "pulsatile_rest_pct_80_ellip_ratio",
+            "pulsatile_rest_pct_80_stretch",
+            "pulsatile_rest_pct_80_stretch_rate",
+            "pulsatile_rest_pct_80_stiffness",
+            "pulsatile_rest_pct_80_pc1_dia",
+            "pulsatile_rest_pct_80_pc1_sys",
+            "pulsatile_rest_pct_100_lumen",
+            "pulsatile_rest_pct_100_min_dist",
+            "pulsatile_rest_pct_100_ellip_ratio",
+            "pulsatile_rest_pct_100_stretch",
+            "pulsatile_rest_pct_100_stretch_rate",
+            "pulsatile_rest_pct_100_stiffness",
+            "pulsatile_rest_pct_100_pc1_dia",
+            "pulsatile_rest_pct_100_pc1_sys",
+            "pulsatile_rest_pct_120_lumen",
+            "pulsatile_rest_pct_120_min_dist",
+            "pulsatile_rest_pct_120_ellip_ratio",
+            "pulsatile_rest_pct_120_stretch",
+            "pulsatile_rest_pct_120_stretch_rate",
+            "pulsatile_rest_pct_120_stiffness",
+            "pulsatile_rest_pct_120_pc1_dia",
+            "pulsatile_rest_pct_120_pc1_sys",
+            "pulsatile_rest_pct_140_lumen",
+            "pulsatile_rest_pct_140_min_dist",
+            "pulsatile_rest_pct_140_ellip_ratio",
+            "pulsatile_rest_pct_140_stretch",
+            "pulsatile_rest_pct_140_stretch_rate",
+            "pulsatile_rest_pct_140_stiffness",
+            "pulsatile_rest_pct_140_pc1_dia",
+            "pulsatile_rest_pct_140_pc1_sys",
+            "pulsatile_rest_pct_160_lumen",
+            "pulsatile_rest_pct_160_min_dist",
+            "pulsatile_rest_pct_160_ellip_ratio",
+            "pulsatile_rest_pct_160_stretch",
+            "pulsatile_rest_pct_160_stretch_rate",
+            "pulsatile_rest_pct_160_stiffness",
+            "pulsatile_rest_pct_160_pc1_dia",
+            "pulsatile_rest_pct_160_pc1_sys",
+            "pulsatile_rest_pc1_systole_ost",
+            "pulsatile_rest_lumen_mla",
+            "pulsatile_rest_min_mla",
+            "pulsatile_rest_ellip_mla",
+            "pulsatile_rest_stretch_mla",
+            "pulsatile_rest_stretch_rate_mla",
+            "pulsatile_rest_stiffness_mla",
+            "pulsatile_rest_pc1_diastole_mla",
+            "pulsatile_rest_pc1_systole_mla",
+        ]
+
+        # Keep only predictors actually in the dataframe
+        predictors = [p for p in predictors if p in self.data.columns]
+        if not predictors:
+            logger.error("No predictor columns found in data. Check names.")
+            return
+
+        all_results = []
+
+        for outcome in outcomes:
+            if outcome not in self.data.columns:
+                logger.warning(f"Outcome '{outcome}' not found in data. Skipping.")
+                continue
+
+            rows = []
+            # we'll compute BH-FDR per outcome at the end, collect p-values
+            pvals = []
+            for predictor in predictors:
+                # Prepare a minimal dataframe with the two columns
+                sub = self.data[[predictor, outcome]].copy()
+
+                # Drop if predictor has no variance
+                if sub[predictor].nunique(dropna=True) <= 1:
+                    logger.debug(
+                        f"Predictor {predictor} has <=1 unique value; skipping."
+                    )
+                    continue
+
+                # Simple mean imputation for missing values
+                imp = SimpleImputer(strategy="mean")
+                arr = imp.fit_transform(sub)
+
+                X = arr[:, 0]
+                y = arr[:, 1]
+                # build design matrix with intercept
+                X_design = sm.add_constant(X)
+
+                try:
+                    model = sm.OLS(y, X_design).fit()
+                except Exception as e:
+                    logger.exception(
+                        f"Regression failed for {predictor} -> {outcome}: {e}"
+                    )
+                    continue
+
+                coef = model.params[1] if len(model.params) > 1 else np.nan
+                se = model.bse[1] if len(model.bse) > 1 else np.nan
+                tval = model.tvalues[1] if len(model.tvalues) > 1 else np.nan
+                pval = model.pvalues[1] if len(model.pvalues) > 1 else np.nan
+                n_obs = int(
+                    np.sum(~np.isnan(self.data[[predictor, outcome]]).any(axis=1))
+                )
+                row = {
+                    "outcome": outcome,
+                    "predictor": predictor,
+                    "n": n_obs,
+                    "coef": float(coef),
+                    "coef_se": float(se),
+                    "t": float(tval),
+                    "pvalue": float(pval),
+                    "r_squared": float(model.rsquared),
+                    "adj_r_squared": float(model.rsquared_adj),
+                    "aic": float(model.aic),
+                    "bic": float(model.bic),
+                }
+                rows.append(row)
+                pvals.append(pval)
+
+            # adjust p-values (Benjamini-Hochberg) for this outcome
+            if rows:
+                pvals_arr = np.array([r["pvalue"] for r in rows])
+                # multipletests returns: rej, pvals_corrected, _, _
+                rej, pvals_bh, _, _ = multipletests(
+                    pvals_arr, alpha=0.05, method="fdr_bh"
+                )
+                for i, r in enumerate(rows):
+                    r["pvalue_adj_fdr_bh"] = float(pvals_bh[i])
+                    r["significant_fdr_bh"] = bool(rej[i])
+
+                # save per-outcome CSV
+                df_out = pd.DataFrame(rows).sort_values("pvalue")
+                fname = os.path.join(
+                    self.output_path, f"{outcome}_linear_regression_results.csv"
+                )
+                df_out.to_csv(fname, index=False)
+                logger.info(f"Wrote {fname} with {len(df_out)} predictor results.")
+
+                all_results.extend(rows)
+
+        # save combined CSV
+        if all_results:
+            df_all = pd.DataFrame(all_results).sort_values(["outcome", "pvalue"])
+            all_path = os.path.join(self.output_path, "all_linear_results.csv")
+            df_all.to_csv(all_path, index=False)
+            logger.info(f"Wrote combined results to {all_path}.")
+        else:
+            logger.warning("No regression results to save.")
 
     def process_local_patient_data(self) -> pd.DataFrame:
         pass

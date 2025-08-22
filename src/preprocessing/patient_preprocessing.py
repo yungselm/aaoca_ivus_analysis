@@ -850,13 +850,13 @@ class PatientPreprocessing:
                 "delta_elliptic_ratio"
             ],
             "stressind_dia_lumen_percent_ost": self.df_dia.iloc[ost_pos_dia][
-                "lumen_area_dia_rest"
+                "lumen_area_dia_stress"
             ]
-            / self.df_dia.iloc[ost_pos_dia]["lumen_area_dia_stress"],
+            / self.df_dia.iloc[ost_pos_dia]["lumen_area_dia_rest"],
             "stressind_dia_min_percent_ost": self.df_dia.iloc[ost_pos_dia][
-                "min_dist_dia_rest"
+                "min_dist_dia_stress"
             ]
-            / self.df_dia.iloc[ost_pos_dia]["min_dist_dia_stress"],
+            / self.df_dia.iloc[ost_pos_dia]["min_dist_dia_rest"],
             "stressind_dia_stretch_ost": self.df_dia.iloc[ost_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_ost": self.df_dia.iloc[ost_pos_dia][
                 "stretch_rate"
@@ -876,13 +876,13 @@ class PatientPreprocessing:
                 "delta_elliptic_ratio"
             ],
             "stressind_dia_lumen_percent_mla": self.df_dia.iloc[mla_pos_dia][
-                "lumen_area_dia_rest"
+                "lumen_area_dia_stress"
             ]
-            / self.df_dia.iloc[mla_pos_dia]["lumen_area_dia_stress"],
+            / self.df_dia.iloc[mla_pos_dia]["lumen_area_dia_rest"],
             "stressind_dia_min_percent_mla": self.df_dia.iloc[mla_pos_dia][
-                "min_dist_dia_rest"
+                "min_dist_dia_stress"
             ]
-            / self.df_dia.iloc[mla_pos_dia]["min_dist_dia_stress"],
+            / self.df_dia.iloc[mla_pos_dia]["min_dist_dia_rest"],
             "stressind_dia_stretch_mla": self.df_dia.iloc[mla_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_mla": self.df_dia.iloc[mla_pos_dia][
                 "stretch_rate"
@@ -901,14 +901,14 @@ class PatientPreprocessing:
             "stressind_sys_ellip_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_elliptic_ratio"
             ],
-            "stressind_dia_lumen_percent_ost": self.df_sys.iloc[ost_pos_sys][
-                "lumen_area_sys_rest"
+            "stressind_sys_lumen_percent_ost": self.df_sys.iloc[ost_pos_sys][
+                "lumen_area_sys_stress"
             ]
-            / self.df_sys.iloc[ost_pos_sys]["lumen_area_sys_stress"],
-            "stressind_dia_min_percent_ost": self.df_sys.iloc[ost_pos_sys][
-                "min_dist_sys_rest"
+            / self.df_sys.iloc[ost_pos_sys]["lumen_area_sys_rest"],
+            "stressind_sys_min_percent_ost": self.df_sys.iloc[ost_pos_sys][
+                "min_dist_sys_stress"
             ]
-            / self.df_sys.iloc[ost_pos_sys]["max_dist_sys_stress"],
+            / self.df_sys.iloc[ost_pos_sys]["max_dist_sys_rest"],
             "stressind_sys_stretch_ost": self.df_sys.iloc[ost_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_ost": self.df_sys.iloc[ost_pos_sys][
                 "stretch_rate"
@@ -928,13 +928,13 @@ class PatientPreprocessing:
                 "delta_elliptic_ratio"
             ],
             "stressind_sys_lumen_percent_mla": self.df_sys.iloc[mla_pos_sys][
-                "lumen_area_sys_rest"
+                "lumen_area_sys_stress"
             ]
-            / self.df_sys.iloc[mla_pos_sys]["lumen_area_sys_stress"],
+            / self.df_sys.iloc[mla_pos_sys]["lumen_area_sys_rest"],
             "stressind_sys_min_percent_mla": self.df_sys.iloc[mla_pos_sys][
-                "min_dist_sys_rest"
+                "min_dist_sys_stress"
             ]
-            / self.df_sys.iloc[mla_pos_sys]["max_dist_sys_stress"],
+            / self.df_sys.iloc[mla_pos_sys]["max_dist_sys_rest"],
             "stressind_sys_stretch_mla": self.df_sys.iloc[mla_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_mla": self.df_sys.iloc[mla_pos_sys][
                 "stretch_rate"
