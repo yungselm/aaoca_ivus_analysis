@@ -38,7 +38,9 @@ class PatientStats:
         self.run_linear_pairwise()
         path_data = os.path.join(self.input_dir, "test_data.csv")
         self.data.to_csv(path_data)
-        # self.kmeans_clustering(3)
+        self.univariate_logistic_regression()
+        self.univariate_logistic_regression("iFR_mean_dobu")
+        self.kmeans_clustering(3)
 
     def load_patient_data(self) -> pd.DataFrame:
         """
@@ -464,6 +466,190 @@ class PatientStats:
     def exploratory_data_analysis(self):
         pass
 
+    # def kmeans_clustering(
+    #     self,
+    #     n_clusters: int | None = None,
+    #     k_search_range=(2, 6),
+    #     plot_path: str | None = None,
+    # ):
+    #     """
+    #     KMeans clustering on pulsatile_rest features excluding pct_* and numeric-percentage slots (20/40/...).
+    #     - n_clusters: if provided, use that. If None, pick by silhouette in k_search_range.
+    #     - plot_path: if provided, save the PCA scatter to that path; otherwise show it.
+    #     """
+
+    #     # sanity
+    #     if self.data is None or self.data.empty:
+    #         raise ValueError("No patient data loaded. Run load_patient_data first.")
+
+    #     # --- safe pc1 delta computation (creates pc1_ost_change, pc1_ost_rel_change, pc1_mla_change, pc1_mla_rel_change) ---
+    #     def safe_compute_delta(df, s_col, d_col, out_prefix):
+    #         if s_col in df.columns and d_col in df.columns:
+    #             delta = df[s_col] - df[d_col]
+    #             rel = np.where(df[d_col].abs() > 1e-12, delta / df[d_col], np.nan)
+    #             df[f"{out_prefix}_change"] = delta
+    #             df[f"{out_prefix}_rel_change"] = rel
+    #         else:
+    #             logger.debug(
+    #                 f"Skipping delta creation for missing columns: {s_col}, {d_col}"
+    #             )
+
+    #     safe_compute_delta(
+    #         self.data,
+    #         "pulsatile_rest_pc1_systole_ost",
+    #         "pulsatile_rest_pc1_diastole_ost",
+    #         "pc1_ost",
+    #     )
+    #     safe_compute_delta(
+    #         self.data,
+    #         "pulsatile_rest_pc1_systole_mla",
+    #         "pulsatile_rest_pc1_diastole_mla",
+    #         "pc1_mla",
+    #     )
+
+    #     # --- pick features: only pulsatile_rest_ features + the two pressure/time change cols, but exclude pct_* and _20_, _40_, etc. ---
+    #     allowed_prefixes = ("pulsatile_rest_",)
+
+    #     # substrings to exclude (the pct groups and numeric percent markers)
+    #     exclude_substrings = (
+    #         "_pct_",
+    #         "_20_",
+    #         "_40_",
+    #         "_60_",
+    #         "_80_",
+    #         "_100_",
+    #         "_120_",
+    #         "_140_",
+    #         "_160_",
+    #     )
+
+    #     def keep_col(col: str) -> bool:
+    #         # starts with allowed prefixes AND does not contain any exclude substring
+    #         if not col.startswith(allowed_prefixes):
+    #             return False
+    #         for ex in exclude_substrings:
+    #             if ex in col:
+    #                 return False
+    #         return True
+
+    #     rest_features = [col for col in self.data.columns if keep_col(col)]
+
+    #     # include pc1 features if they were created
+    #     pc1_features = [
+    #         c
+    #         for c in (
+    #             "pc1_ost_change",
+    #             "pc1_ost_rel_change",
+    #             "pc1_mla_change",
+    #             "pc1_mla_rel_change",
+    #         )
+    #         if c in self.data.columns
+    #     ]
+
+    #     features = rest_features + pc1_features
+
+    #     if not features:
+    #         raise ValueError(
+    #             "No matching features found for clustering. Check column names / prefixes."
+    #         )
+
+    #     print("Using features for clustering (count={}):".format(len(features)))
+    #     print(features)
+
+    #     # --- build matrix, impute, scale ---
+    #     X = self.data[features].copy()
+
+    #     imputer = SimpleImputer(strategy="median")
+    #     X_imputed = imputer.fit_transform(X)
+
+    #     scaler = StandardScaler()
+    #     X_scaled = scaler.fit_transform(X_imputed)
+
+    #     # --- choose k by silhouette if not provided ---
+    #     if n_clusters is None:
+    #         best_k = None
+    #         best_score = -1.0
+    #         for k in range(k_search_range[0], k_search_range[1] + 1):
+    #             if k < 2:
+    #                 continue
+    #             km_try = KMeans(n_clusters=k, random_state=42, n_init=10)
+    #             labels_try = km_try.fit_predict(X_scaled)
+    #             if (
+    #                 len(set(labels_try)) < 2
+    #                 or len(set(labels_try)) >= X_scaled.shape[0]
+    #             ):
+    #                 continue
+    #             try:
+    #                 score = silhouette_score(X_scaled, labels_try)
+    #             except Exception:
+    #                 score = -1.0
+    #             print(f"Silhouette for k={k}: {score:.4f}")
+    #             if score > best_score:
+    #                 best_score = score
+    #                 best_k = k
+    #         if best_k is None:
+    #             best_k = 3
+    #             print("Could not pick best k by silhouette; falling back to k=3")
+    #         print(f"Selected k = {best_k} (silhouette {best_score:.4f})")
+    #         n_clusters = best_k
+
+    #     # --- final KMeans ---
+    #     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=50)
+    #     labels = kmeans.fit_predict(X_scaled)
+    #     self.data["cluster"] = labels
+
+    #     # --- summaries ---
+    #     cluster_summary = self.data.groupby("cluster")[features].agg(
+    #         ["mean", "std", "count"]
+    #     )
+    #     print("Cluster summary (mean, std, count):")
+    #     print(cluster_summary)
+
+    #     patients_by_cluster = self.data.groupby("cluster")["patient_id"].apply(list)
+    #     for c, plist in patients_by_cluster.items():
+    #         print(f"\nCluster {c} ({len(plist)} patients):\n{plist}")
+
+    #     # --- PCA visualization ---
+    #     pca = PCA(n_components=3, random_state=42)
+    #     X_pca = pca.fit_transform(X_scaled)
+
+    #     fig, ax = plt.subplots(figsize=(9, 6))
+    #     scatter = ax.scatter(
+    #         X_pca[:, 0],
+    #         X_pca[:, 1],
+    #         c=labels,
+    #         cmap="tab10",
+    #         s=80,
+    #         edgecolor="k",
+    #         linewidth=0.5,
+    #     )
+
+    #     # annotate patient ids (optional — remove or reduce font size if too crowded)
+    #     for i, pid in enumerate(self.data["patient_id"].astype(str).values):
+    #         ax.annotate(pid, (X_pca[i, 0], X_pca[i, 1]), fontsize=7, alpha=0.9)
+
+    #     ax.set_xlabel(f"PCA1 ({pca.explained_variance_ratio_[0]:.2%} var)")
+    #     ax.set_ylabel(f"PCA2 ({pca.explained_variance_ratio_[1]:.2%} var)")
+    #     ax.set_title(f"KMeans clustering (k={n_clusters}) - PCA projection")
+    #     legend1 = ax.legend(*scatter.legend_elements(), title="cluster")
+    #     ax.add_artist(legend1)
+    #     plt.tight_layout()
+
+    #     if plot_path:
+    #         fig.savefig(plot_path, dpi=200)
+    #         print(f"Saved cluster PCA plot to {plot_path}")
+    #         plt.close(fig)
+    #     else:
+    #         plt.show()
+
+    #     return {
+    #         "kmeans": kmeans,
+    #         "scaler": scaler,
+    #         "imputer": imputer,
+    #         "features": features,
+    #         "pca": pca,
+    #     }
+
     def kmeans_clustering(
         self,
         n_clusters: int | None = None,
@@ -471,7 +657,7 @@ class PatientStats:
         plot_path: str | None = None,
     ):
         """
-        KMeans clustering on pulsatile_rest features excluding pct_* and numeric-percentage slots (20/40/...).
+        KMeans clustering on stressind_* features excluding pct_* and numeric-percentage slots (20/40/...).
         - n_clusters: if provided, use that. If None, pick by silhouette in k_search_range.
         - plot_path: if provided, save the PCA scatter to that path; otherwise show it.
         """
@@ -480,7 +666,7 @@ class PatientStats:
         if self.data is None or self.data.empty:
             raise ValueError("No patient data loaded. Run load_patient_data first.")
 
-        # --- safe pc1 delta computation (creates pc1_ost_change, pc1_ost_rel_change, pc1_mla_change, pc1_mla_rel_change) ---
+        # --- safe pc1 delta computation (creates stressind_*_pc1_change and rel_change) ---
         def safe_compute_delta(df, s_col, d_col, out_prefix):
             if s_col in df.columns and d_col in df.columns:
                 delta = df[s_col] - df[d_col]
@@ -492,23 +678,37 @@ class PatientStats:
                     f"Skipping delta creation for missing columns: {s_col}, {d_col}"
                 )
 
+        # dia ost & mla
         safe_compute_delta(
             self.data,
-            "pulsatile_rest_pc1_systole_ost",
-            "pulsatile_rest_pc1_diastole_ost",
-            "pc1_ost",
+            "stressind_dia_pc1_systole_ost",
+            "stressind_dia_pc1_diastole_ost",
+            "dia_pc1_ost",
         )
         safe_compute_delta(
             self.data,
-            "pulsatile_rest_pc1_systole_mla",
-            "pulsatile_rest_pc1_diastole_mla",
-            "pc1_mla",
+            "stressind_dia_pc1_systole_mla",
+            "stressind_dia_pc1_diastole_mla",
+            "dia_pc1_mla",
         )
 
-        # --- pick features: only pulsatile_rest_ features + the two pressure/time change cols, but exclude pct_* and _20_, _40_, etc. ---
-        allowed_prefixes = ("pulsatile_rest_",)
+        # sys ost & mla
+        safe_compute_delta(
+            self.data,
+            "stressind_sys_pc1_systole_ost",
+            "stressind_sys_pc1_diastole_ost",
+            "sys_pc1_ost",
+        )
+        safe_compute_delta(
+            self.data,
+            "stressind_sys_pc1_systole_mla",
+            "stressind_sys_pc1_diastole_mla",
+            "sys_pc1_mla",
+        )
 
-        # substrings to exclude (the pct groups and numeric percent markers)
+        # --- pick features: only stressind_* features + the computed pc1 deltas ---
+        allowed_prefixes = ("stressind_",)
+
         exclude_substrings = (
             "_pct_",
             "_20_",
@@ -522,7 +722,6 @@ class PatientStats:
         )
 
         def keep_col(col: str) -> bool:
-            # starts with allowed prefixes AND does not contain any exclude substring
             if not col.startswith(allowed_prefixes):
                 return False
             for ex in exclude_substrings:
@@ -530,21 +729,24 @@ class PatientStats:
                     return False
             return True
 
-        rest_features = [col for col in self.data.columns if keep_col(col)]
+        stressind_features = [col for col in self.data.columns if keep_col(col)]
 
-        # include pc1 features if they were created
         pc1_features = [
             c
             for c in (
-                "pc1_ost_change",
-                "pc1_ost_rel_change",
-                "pc1_mla_change",
-                "pc1_mla_rel_change",
+                "dia_pc1_ost_change",
+                "dia_pc1_ost_rel_change",
+                "dia_pc1_mla_change",
+                "dia_pc1_mla_rel_change",
+                "sys_pc1_ost_change",
+                "sys_pc1_ost_rel_change",
+                "sys_pc1_mla_change",
+                "sys_pc1_mla_rel_change",
             )
             if c in self.data.columns
         ]
 
-        features = rest_features + pc1_features
+        features = stressind_features + pc1_features
 
         if not features:
             raise ValueError(
@@ -622,7 +824,6 @@ class PatientStats:
             linewidth=0.5,
         )
 
-        # annotate patient ids (optional — remove or reduce font size if too crowded)
         for i, pid in enumerate(self.data["patient_id"].astype(str).values):
             ax.annotate(pid, (X_pca[i, 0], X_pca[i, 1]), fontsize=7, alpha=0.9)
 
@@ -648,7 +849,69 @@ class PatientStats:
             "pca": pca,
         }
 
-    def log_regression_phase(
-        self, target_var_cont="pdpa_mean_stress", target_cutoff=0.8
+    def univariate_logistic_regression(
+        self, target_var_cont="pdpa_mean_dobu", target_cutoff=0.8
     ):
-        pass
+        """
+        Perform simple (univariate) logistic regression for each numeric feature.
+        Predicts a binary target derived from `target_var_cont` <= `target_cutoff`.
+        Saves results including coefficients, p-values (if available), and AUC scores.
+        """
+        from sklearn.metrics import roc_auc_score
+        import statsmodels.api as sm
+
+        df = self.data.copy()
+        df["target"] = (df[target_var_cont] <= target_cutoff).astype(int)
+
+        results = []
+
+        numeric_features = df.select_dtypes(include=np.number).columns.drop(
+            "target", errors="ignore"
+        )
+        logger.info(
+            f"Running univariate logistic regression on {len(numeric_features)} features."
+        )
+
+        for feature in numeric_features:
+            try:
+                X = df[[feature]].dropna()
+                y = df.loc[X.index, "target"]
+
+                # Skip if not enough variation
+                if y.nunique() != 2 or len(X) < 10:
+                    logger.debug(
+                        f"Skipping {feature}: not enough class variation or data."
+                    )
+                    continue
+
+                # Use statsmodels for coefficient and p-value
+                X_sm = sm.add_constant(X)
+                model = sm.Logit(y, X_sm).fit(disp=0)
+                pred_prob = model.predict(X_sm)
+
+                auc = roc_auc_score(y, pred_prob)
+
+                results.append(
+                    {
+                        "feature": feature,
+                        "coef": model.params[feature],
+                        "p_value": model.pvalues[feature],
+                        "auc": auc,
+                        "n_samples": len(y),
+                    }
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed on {feature}: {e}")
+                continue
+
+        results_df = pd.DataFrame(results)
+        results_df = results_df[
+            results_df["p_value"] < 0.05
+        ]  # Filter significant features
+        results_df = results_df.sort_values(by="auc", ascending=False)
+        output_file = os.path.join(
+            self.input_dir, f"logreg_univariate_{target_var_cont}_{target_cutoff}_local.csv"
+        )
+        results_df.to_csv(output_file, index=False)
+        logger.success(f"Univariate logistic regression results saved to {output_file}")

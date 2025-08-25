@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from loguru import logger
+
 from stats.patient_stats import PatientStats
+from stats.global_stats import GlobalStats
+from data_io.global_data import GlobalData
+from data_io.patient_data import LoadIndividualData
+from preprocessing.patient_preprocessing import PatientPreprocessing
 
-
-GLOBAL_PATH = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data"
-GLOBAL_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data/output/global_stats"
-PATIENT_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data/output/patient_stats"
-# GLOBAL_PATH = "D:/00_coding/aaoca_ivus_analysis/data"
-# GLOBAL_OUTPUT = "D:/00_coding//aaoca_ivus_analysis/data/output/global_stats"
-# PATIENT_OUTPUT = "D:/00_coding//aaoca_ivus_analysis/data/output/patient_stats"
+# GLOBAL_PATH = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data"
+# GLOBAL_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data/output/global_stats"
+# PATIENT_OUTPUT = "C:/WorkingData/Documents/2_Coding/Python/aaoca_ivus_analysis/data/output/patient_stats"
+GLOBAL_PATH = "D:/00_coding/aaoca_ivus_analysis/data"
+GLOBAL_OUTPUT = "D:/00_coding//aaoca_ivus_analysis/data/output/global_stats"
+PATIENT_OUTPUT = "D:/00_coding//aaoca_ivus_analysis/data/output/patient_stats"
 
 
 def main():
@@ -43,7 +48,7 @@ def main():
     #     "narco_218",
     #     "narco_219",
     #     "narco_234",
-    #     "narco_241",
+    #     # "narco_241",
     #     "narco_247",
     #     "narco_248",
     #     "narco_249",

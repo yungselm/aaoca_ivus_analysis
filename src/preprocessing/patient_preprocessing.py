@@ -644,6 +644,7 @@ class PatientPreprocessing:
         )  # number of segments for extramural, 3 based on data
 
         section_stats = {}
+
         for phase, df in (
             ("pulsatile_rest", self.df_rest),
             ("pulsatile_stress", self.df_stress),
@@ -654,39 +655,46 @@ class PatientPreprocessing:
                 z0 = i * im_20_per
                 z1 = (i + 1) * im_20_per
                 sel = df[(df["z_value"] >= z0) & (df["z_value"] < z1)]
-                if sel.empty:
-                    mean_lumen = np.nan
-                    mean_min_dist = np.nan
-                    mean_elliptic_ratio = np.nan
-                    mean_stretch = np.nan
-                    mean_stretch_rate = np.nan
-                    mean_stiffness = np.nan
-                    mean_pc1_dia = np.nan
-                    mean_pc1_sys = np.nan
 
+                if sel.empty:
+                    mean_values = {k: np.nan for k in [
+                        "lumen", "min_dist", "ellip_ratio", "stretch", "stretch_rate",
+                        "stiffness", "pc1_dia", "pc1_sys",
+                        "lumen_dia", "lumen_sys", "min_dist_dia", "min_dist_sys"
+                    ]}
                 else:
-                    mean_lumen = sel["delta_lumen_area"].mean()
-                    mean_min_dist = sel["delta_min_dist"].mean()
-                    mean_elliptic_ratio = sel["delta_elliptic_ratio"].mean()
-                    mean_stretch = sel["stretch"].mean()
-                    mean_stretch_rate = sel["stretch_rate"].mean()
-                    mean_stiffness = sel["stiffness"].mean()
-                    mean_pc1_dia = sel["pc1_diastole"].mean()
-                    mean_pc1_sys = sel["pc1_systole"].mean()
+                    # base metrics (always the same column names)
+                    mean_values = {
+                        "lumen": sel["delta_lumen_area"].mean(),
+                        "min_dist": sel["delta_min_dist"].mean(),
+                        "ellip_ratio": sel["delta_elliptic_ratio"].mean(),
+                        "stretch": sel["stretch"].mean(),
+                        "stretch_rate": sel["stretch_rate"].mean(),
+                        "stiffness": sel["stiffness"].mean(),
+                        "pc1_dia": sel["pc1_diastole"].mean(),
+                        "pc1_sys": sel["pc1_systole"].mean(),
+                    }
+
+                    # candidate column mappings for dia/sys values
+                    mapping = {
+                        "lumen_dia": ["lumen_area_dia", "lumen_area_sys_rest", "lumen_area_dia_rest"],
+                        "lumen_sys": ["lumen_area_sys", "lumen_area_sys_stress", "lumen_area_dia_stress"],
+                        "min_dist_dia": ["min_dist_dia", "min_dist_sys_rest", "min_dist_dia_rest"],
+                        "min_dist_sys": ["min_dist_sys", "min_dist_sys_stress", "min_dist_dia_stress"],
+                    }
+
+                    # loop through mapping: take first matching column
+                    for key, candidates in mapping.items():
+                        for c in candidates:
+                            if c in sel.columns:
+                                mean_values[key] = sel[c].mean()
+                                break
+                        else:
+                            mean_values[key] = np.nan  # no match
 
                 pct_label = (i + 1) * 20
-                section_stats[f"{phase}_pct_{pct_label}_lumen"] = mean_lumen
-                section_stats[f"{phase}_pct_{pct_label}_min_dist"] = mean_min_dist
-                section_stats[f"{phase}_pct_{pct_label}_ellip_ratio"] = (
-                    mean_elliptic_ratio
-                )
-                section_stats[f"{phase}_pct_{pct_label}_stretch"] = mean_stretch
-                section_stats[f"{phase}_pct_{pct_label}_stretch_rate"] = (
-                    mean_stretch_rate
-                )
-                section_stats[f"{phase}_pct_{pct_label}_stiffness"] = mean_stiffness
-                section_stats[f"{phase}_pct_{pct_label}_pc1_dia"] = mean_pc1_dia
-                section_stats[f"{phase}_pct_{pct_label}_pc1_sys"] = mean_pc1_sys
+                for key, value in mean_values.items():
+                    section_stats[f"{phase}_pct_{pct_label}_{key}"] = value
 
         # 5) Compute MLA positions, clamped
         def clamp(idx, df):
@@ -729,13 +737,13 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_ost": self.df_rest.iloc[ost_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_lumen_percent_ost": self.df_rest.iloc[ost_pos_rest][
+            "pulsatile_rest_lumen_percent_ost": (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] - self.df_rest.iloc[ost_pos_rest][
                 "lumen_area_sys"
-            ]
+            ])
             / self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"],
-            "pulsatile_rest_min_percent_ost": self.df_rest.iloc[ost_pos_rest][
+            "pulsatile_rest_min_percent_ost": (self.df_rest.iloc[ost_pos_rest]["min_dist_dia"] - self.df_rest.iloc[ost_pos_rest][
                 "min_dist_sys"
-            ]
+            ])
             / self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
             "pulsatile_rest_stretch_ost": self.df_rest.iloc[ost_pos_rest]["stretch"],
             "pulsatile_rest_stretch_rate_ost": self.df_rest.iloc[ost_pos_rest][
@@ -757,13 +765,13 @@ class PatientPreprocessing:
             "pulsatile_rest_ellip_mla": self.df_rest.iloc[mla_pos_rest][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_rest_lumen_percent_mla": self.df_rest.iloc[mla_pos_rest][
+            "pulsatile_rest_lumen_percent_mla": (self.df_rest.iloc[mla_pos_rest]["lumen_area_dia"] - self.df_rest.iloc[mla_pos_rest][
                 "lumen_area_sys"
-            ]
+            ])
             / self.df_rest.iloc[mla_pos_rest]["lumen_area_dia"],
-            "pulsatile_rest_min_percent_mla": self.df_rest.iloc[mla_pos_rest][
+            "pulsatile_rest_min_percent_mla": (self.df_rest.iloc[mla_pos_rest]["min_dist_dia"] - self.df_rest.iloc[mla_pos_rest][
                 "min_dist_sys"
-            ]
+            ])
             / self.df_rest.iloc[mla_pos_rest]["min_dist_dia"],
             "pulsatile_rest_stretch_mla": self.df_rest.iloc[mla_pos_rest]["stretch"],
             "pulsatile_rest_stretch_rate_mla": self.df_rest.iloc[mla_pos_rest][
@@ -787,13 +795,13 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_ost": self.df_stress.iloc[ost_pos_stress][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_stress_lumen_percent_ost": self.df_stress.iloc[ost_pos_stress][
+            "pulsatile_stress_lumen_percent_ost": (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] - self.df_stress.iloc[ost_pos_stress][
                 "lumen_area_sys"
-            ]
+            ])
             / self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
-            "pulsatile_stress_min_percent_ost": self.df_stress.iloc[ost_pos_stress][
+            "pulsatile_stress_min_percent_ost": (self.df_stress.iloc[ost_pos_stress]["min_dist_dia"] - self.df_stress.iloc[ost_pos_stress][
                 "min_dist_sys"
-            ]
+            ])
             / self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
             "pulsatile_stress_stretch_ost": self.df_stress.iloc[ost_pos_stress][
                 "stretch"
@@ -819,13 +827,13 @@ class PatientPreprocessing:
             "pulsatile_stress_ellip_mla": self.df_stress.iloc[mla_pos_stress][
                 "delta_elliptic_ratio"
             ],
-            "pulsatile_stress_lumen_percent_mla": self.df_stress.iloc[mla_pos_stress][
+            "pulsatile_stress_lumen_percent_mla": (self.df_stress.iloc[mla_pos_stress]["lumen_area_dia"] - self.df_stress.iloc[mla_pos_stress][
                 "lumen_area_sys"
-            ]
+            ])
             / self.df_stress.iloc[mla_pos_stress]["lumen_area_dia"],
-            "pulsatile_stress_min_percent_mla": self.df_stress.iloc[mla_pos_stress][
+            "pulsatile_stress_min_percent_mla": (self.df_stress.iloc[mla_pos_stress]["min_dist_dia"] - self.df_stress.iloc[mla_pos_stress][
                 "min_dist_sys"
-            ]
+            ])
             / self.df_stress.iloc[mla_pos_stress]["min_dist_dia"],
             "pulsatile_stress_stretch_mla": self.df_stress.iloc[mla_pos_stress][
                 "stretch"
@@ -849,13 +857,13 @@ class PatientPreprocessing:
             "stressind_dia_ellip_ost": self.df_dia.iloc[ost_pos_dia][
                 "delta_elliptic_ratio"
             ],
-            "stressind_dia_lumen_percent_ost": self.df_dia.iloc[ost_pos_dia][
+            "stressind_dia_lumen_percent_ost": (self.df_dia.iloc[ost_pos_dia]["lumen_area_dia_rest"] - self.df_dia.iloc[ost_pos_dia][
                 "lumen_area_dia_stress"
-            ]
+            ])
             / self.df_dia.iloc[ost_pos_dia]["lumen_area_dia_rest"],
-            "stressind_dia_min_percent_ost": self.df_dia.iloc[ost_pos_dia][
+            "stressind_dia_min_percent_ost": (self.df_dia.iloc[ost_pos_dia]["min_dist_dia_rest"] - self.df_dia.iloc[ost_pos_dia][
                 "min_dist_dia_stress"
-            ]
+            ])
             / self.df_dia.iloc[ost_pos_dia]["min_dist_dia_rest"],
             "stressind_dia_stretch_ost": self.df_dia.iloc[ost_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_ost": self.df_dia.iloc[ost_pos_dia][
@@ -875,13 +883,13 @@ class PatientPreprocessing:
             "stressind_dia_ellip_mla": self.df_dia.iloc[mla_pos_dia][
                 "delta_elliptic_ratio"
             ],
-            "stressind_dia_lumen_percent_mla": self.df_dia.iloc[mla_pos_dia][
+            "stressind_dia_lumen_percent_mla": (self.df_dia.iloc[mla_pos_dia]["lumen_area_dia_rest"] - self.df_dia.iloc[mla_pos_dia][
                 "lumen_area_dia_stress"
-            ]
+            ])
             / self.df_dia.iloc[mla_pos_dia]["lumen_area_dia_rest"],
-            "stressind_dia_min_percent_mla": self.df_dia.iloc[mla_pos_dia][
+            "stressind_dia_min_percent_mla": (self.df_dia.iloc[mla_pos_dia]["min_dist_dia_rest"] - self.df_dia.iloc[mla_pos_dia][
                 "min_dist_dia_stress"
-            ]
+            ])
             / self.df_dia.iloc[mla_pos_dia]["min_dist_dia_rest"],
             "stressind_dia_stretch_mla": self.df_dia.iloc[mla_pos_dia]["stretch"],
             "stressind_dia_stretch_rate_mla": self.df_dia.iloc[mla_pos_dia][
@@ -901,13 +909,13 @@ class PatientPreprocessing:
             "stressind_sys_ellip_ost": self.df_sys.iloc[ost_pos_sys][
                 "delta_elliptic_ratio"
             ],
-            "stressind_sys_lumen_percent_ost": self.df_sys.iloc[ost_pos_sys][
+            "stressind_sys_lumen_percent_ost": (self.df_sys.iloc[ost_pos_sys]["lumen_area_sys_rest"] - self.df_sys.iloc[ost_pos_sys][
                 "lumen_area_sys_stress"
-            ]
+            ])
             / self.df_sys.iloc[ost_pos_sys]["lumen_area_sys_rest"],
-            "stressind_sys_min_percent_ost": self.df_sys.iloc[ost_pos_sys][
+            "stressind_sys_min_percent_ost": (self.df_sys.iloc[ost_pos_sys]["max_dist_sys_rest"] - self.df_sys.iloc[ost_pos_sys][
                 "min_dist_sys_stress"
-            ]
+            ])
             / self.df_sys.iloc[ost_pos_sys]["max_dist_sys_rest"],
             "stressind_sys_stretch_ost": self.df_sys.iloc[ost_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_ost": self.df_sys.iloc[ost_pos_sys][
@@ -927,13 +935,13 @@ class PatientPreprocessing:
             "stressind_sys_ellip_mla": self.df_sys.iloc[mla_pos_sys][
                 "delta_elliptic_ratio"
             ],
-            "stressind_sys_lumen_percent_mla": self.df_sys.iloc[mla_pos_sys][
+            "stressind_sys_lumen_percent_mla": (self.df_sys.iloc[mla_pos_sys]["lumen_area_sys_rest"] - self.df_sys.iloc[mla_pos_sys][
                 "lumen_area_sys_stress"
-            ]
+            ])
             / self.df_sys.iloc[mla_pos_sys]["lumen_area_sys_rest"],
-            "stressind_sys_min_percent_mla": self.df_sys.iloc[mla_pos_sys][
+            "stressind_sys_min_percent_mla": (self.df_sys.iloc[mla_pos_sys]["max_dist_sys_rest"] - self.df_sys.iloc[mla_pos_sys][
                 "min_dist_sys_stress"
-            ]
+            ])
             / self.df_sys.iloc[mla_pos_sys]["max_dist_sys_rest"],
             "stressind_sys_stretch_mla": self.df_sys.iloc[mla_pos_sys]["stretch"],
             "stressind_sys_stretch_rate_mla": self.df_sys.iloc[mla_pos_sys][
@@ -946,6 +954,30 @@ class PatientPreprocessing:
             "stressind_sys_pc1_systole_mla": self.df_sys.iloc[mla_pos_sys][
                 "pc1_systole"
             ],
+            "ost_lumen_area_dia_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"],
+            "ost_lumen_area_sys_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"],
+            "ost_lumen_area_dia_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
+            "ost_lumen_area_sys_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"],
+            "ost_lumen_narrow_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
+            "ost_lumen_narrow_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
+            "ost_lumen_narrow_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
+            "ost_lumen_narrow_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
+            "mla_dia_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"],
+            "mla_sys_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"],
+            "mla_dia_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
+            "mla_sys_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"],
+            "mln_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
+            "mln_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
+            "mln_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
+            "mln_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
+            "ost_min_dist_dia_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
+            "ost_min_dist_sys_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_sys"],
+            "ost_min_dist_dia_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
+            "ost_min_dist_sys_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_sys"],
+            "mla_min_dist_dia_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
+            "mla_min_dist_sys_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_sys"],
+            "mla_min_dist_dia_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
+            "mla_min_dist_sys_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_sys"],
         }
 
         # 7) Add section stats to the output DataFrame
