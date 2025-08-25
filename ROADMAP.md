@@ -24,6 +24,7 @@
 - [] Vessels with more dynamic more often relevant?
 - [] Automatically identified MLA better diagnostic performance?
 - [] Check that stiffness is only summarized over the intramural course (different behaviour then normal vessel)
+- [] get phase specific data in the summary dataframe for logistic regression analysis
 
 ## Phase 4: Advanced Visualizations
 - [x] Load in png with deformation information from Rust program, summarize pixels to degree groups bin into 20 percent of intramural get the values of all patients summarize in a heatmap

@@ -36,6 +36,8 @@ class PatientStats:
         print(ffr_df)
         print(ifr_df)
         self.run_linear_pairwise()
+        path_data = os.path.join(self.input_dir, "test_data.csv")
+        self.data.to_csv(path_data)
         # self.kmeans_clustering(3)
 
     def load_patient_data(self) -> pd.DataFrame:
@@ -645,3 +647,8 @@ class PatientStats:
             "features": features,
             "pca": pca,
         }
+
+    def log_regression_phase(
+        self, target_var_cont="pdpa_mean_stress", target_cutoff=0.8
+    ):
+        pass
