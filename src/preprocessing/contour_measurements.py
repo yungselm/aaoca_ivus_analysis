@@ -29,6 +29,13 @@ def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
         x, y = points[:, 0], points[:, 1]
         area = 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
 
+        # 3) Compute circumference
+        circumference = 0.0
+        for i in range(n):
+            dx = points[i, 0] - points[(i + 1) % n, 0]
+            dy = points[i, 1] - points[(i + 1) % n, 1]
+            circumference += np.hypot(dx, dy)
+
         # 3) Compute angles from centroid
         thetas = np.arctan2(points[:, 1] - cy, points[:, 0] - cx)
         thetas[thetas < 0] += 2 * np.pi
@@ -61,7 +68,7 @@ def compute_contour_properties(arr: np.ndarray) -> np.ndarray:
         else:
             elliptic_ratio = max_dist / min_dist
 
-        results.append([contour_id, z, area, min_dist, max_dist, elliptic_ratio])
+        results.append([contour_id, z, area, min_dist, max_dist, elliptic_ratio, circumference])
 
     return np.array(results, dtype=float)
 

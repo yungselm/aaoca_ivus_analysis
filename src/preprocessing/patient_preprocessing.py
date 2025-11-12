@@ -168,13 +168,23 @@ class PatientPreprocessing:
 
     def compute_lumen_changes(self) -> Dict[str, List[float]]:
         results = {}
+        
+        # Helper function to check if we have valid data
+        def has_valid_data(data, min_length=2):
+            return (data is not None and 
+                    len(data) >= min_length and 
+                    None not in data[:min_length])
+        
         # rest
-        if (
-            None not in self.patient_data.pressure_rest
-            and None not in self.patient_data.time_rest
-        ):
+        if has_valid_data(self.patient_data.pressure_rest) and has_valid_data(self.patient_data.time_rest):
             dp = self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
             dt = self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
+        else:
+            dp = np.nan
+            dt = np.nan
+            
+        if (self.patient_data.rest_contours_dia is not None and 
+            self.patient_data.rest_contours_sys is not None):
             df = self._calculate_lumen_change(
                 self.patient_data.rest_contours_dia,
                 self.patient_data.rest_contours_sys,
@@ -184,16 +194,17 @@ class PatientPreprocessing:
                 plot=False,
             )
             results["rest"] = df
+        
         # stress
-        if (
-            None not in self.patient_data.pressure_stress
-            and None not in self.patient_data.time_stress
-        ):
-            dp = (
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_stress[0]
-            )
+        if has_valid_data(self.patient_data.pressure_stress) and has_valid_data(self.patient_data.time_stress):
+            dp = self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
             dt = self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
+        else:
+            dp = np.nan
+            dt = np.nan
+            
+        if (self.patient_data.stress_contours_dia is not None and 
+            self.patient_data.stress_contours_sys is not None):
             df = self._calculate_lumen_change(
                 self.patient_data.stress_contours_dia,
                 self.patient_data.stress_contours_sys,
@@ -204,14 +215,14 @@ class PatientPreprocessing:
             results["stress"] = df
 
         # dia-dia
-        if (
-            None not in self.patient_data.pressure_rest
-            and None not in self.patient_data.pressure_stress
-        ):
-            dp = (
-                self.patient_data.pressure_stress[0]
-                - self.patient_data.pressure_rest[0]
-            )
+        if (has_valid_data(self.patient_data.pressure_rest, 1) and 
+            has_valid_data(self.patient_data.pressure_stress, 1)):
+            dp = self.patient_data.pressure_stress[0] - self.patient_data.pressure_rest[0]
+        else:
+            dp = np.nan
+            
+        if (self.patient_data.dia_contours_rest is not None and 
+            self.patient_data.dia_contours_stress is not None):
             df = self._calculate_lumen_change(
                 self.patient_data.dia_contours_rest,
                 self.patient_data.dia_contours_stress,
@@ -221,14 +232,14 @@ class PatientPreprocessing:
             results["dia_dia"] = df
 
         # sys-sys
-        if (
-            None not in self.patient_data.pressure_rest
-            and None not in self.patient_data.pressure_stress
-        ):
-            dp = (
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_rest[1]
-            )
+        if (has_valid_data(self.patient_data.pressure_rest, 2) and 
+            has_valid_data(self.patient_data.pressure_stress, 2)):
+            dp = self.patient_data.pressure_stress[1] - self.patient_data.pressure_rest[1]
+        else:
+            dp = np.nan
+            
+        if (self.patient_data.sys_contours_rest is not None and 
+            self.patient_data.sys_contours_stress is not None):
             df = self._calculate_lumen_change(
                 self.patient_data.sys_contours_rest,
                 self.patient_data.sys_contours_stress,
@@ -238,7 +249,6 @@ class PatientPreprocessing:
             results["sys_sys"] = df
 
         for cond, df in results.items():
-            # df = df.rename(columns={'lumen_change': f'lumen_change_{cond}'})
             path = os.path.join(self.output_dir, f"{cond}_lumen_changes.csv")
             df.to_csv(path, index=False)
             logger.info(f"Saved {cond} lumen changes to {path}")
@@ -410,64 +420,181 @@ class PatientPreprocessing:
 
         return df
 
-    def compute_sys_dia_properties(self, phase="rest") -> None:
+    def compute_sys_dia_properties(self, phase: str = "rest") -> None:
+        """
+        Compute systolic/diastolic properties, but if pressure/time are missing
+        for the relevant phases, set the dp/dt-dependent columns (deltas) to 0.
+        Results are saved to CSV (merged if existing) and assigned to
+        self.df_rest / self.df_stress / self.df_dia / self.df_sys as appropriate.
+        """
+        # determine missing flags up front
+        pr = self.patient_data.pressure_rest
+        tr = self.patient_data.time_rest
+        ps = self.patient_data.pressure_stress
+        ts = self.patient_data.time_stress
+
+        def _is_missing_pressure_time(p_tuple, t_tuple):
+            # missing if tuple is None OR contains None OR non-finite values
+            try:
+                if p_tuple is None or t_tuple is None:
+                    return True
+                a, b = p_tuple
+                ta, tb = t_tuple
+                vals = [a, b, ta, tb]
+                return any(v is None or not np.isfinite(float(v)) for v in vals)
+            except Exception:
+                return True
+
+        missing_rest = _is_missing_pressure_time(pr, tr)
+        missing_stress = _is_missing_pressure_time(ps, ts)
+
+        # select arrays and compute dp/dt (or mark denom_invalid)
         if phase == "rest":
-            dia, sys = (
-                self.patient_data.rest_contours_dia,
-                self.patient_data.rest_contours_sys,
-            )
-            dp, dt = (
-                self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0],
-                self.patient_data.time_rest[1] - self.patient_data.time_rest[0],
-            )
+            dia = self.patient_data.rest_contours_dia
+            sys = self.patient_data.rest_contours_sys
+            dp = None if missing_rest else (float(pr[1]) - float(pr[0]))
+            dt = None if missing_rest else (float(tr[1]) - float(tr[0]))
+            denom_invalid = (dp is None or dt is None or not np.isfinite(dp) or not np.isfinite(dt) or dp * dt == 0.0)
+            use_zero_deltas = denom_invalid
         elif phase == "stress":
-            dia, sys = (
-                self.patient_data.stress_contours_dia,
-                self.patient_data.stress_contours_sys,
-            )
-            dp, dt = (
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_stress[0],
-                self.patient_data.time_stress[1] - self.patient_data.time_stress[0],
-            )
+            dia = self.patient_data.stress_contours_dia
+            sys = self.patient_data.stress_contours_sys
+            dp = None if missing_stress else (float(ps[1]) - float(ps[0]))
+            dt = None if missing_stress else (float(ts[1]) - float(ts[0]))
+            denom_invalid = (dp is None or dt is None or not np.isfinite(dp) or not np.isfinite(dt) or dp * dt == 0.0)
+            use_zero_deltas = denom_invalid
         elif phase == "dia_dia":
-            dia, sys = (
-                self.patient_data.dia_contours_rest,
-                self.patient_data.dia_contours_stress,
-            )
-            dp, dt = (
-                self.patient_data.pressure_stress[0]
-                - self.patient_data.pressure_rest[0],
-                1,  # No time change for dia-dia
-            )
+            dia = self.patient_data.dia_contours_rest
+            sys = self.patient_data.dia_contours_stress
+            # dp uses rest[0] and stress[0]; if either rest or stress missing -> mark invalid
+            if missing_rest or missing_stress:
+                dp = None
+                use_zero_deltas = True
+            else:
+                dp = float(ps[0]) - float(pr[0])
+                use_zero_deltas = (not np.isfinite(dp) or dp == 0.0)
+            dt = 1.0
         elif phase == "sys_sys":
-            dia, sys = (
-                self.patient_data.sys_contours_rest,
-                self.patient_data.sys_contours_stress,
-            )
-            dp, dt = (
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_rest[1],
-                1,  # No time change for sys-sys
-            )
+            dia = self.patient_data.sys_contours_rest
+            sys = self.patient_data.sys_contours_stress
+            if missing_rest or missing_stress:
+                dp = None
+                use_zero_deltas = True
+            else:
+                dp = float(ps[1]) - float(pr[1])
+                use_zero_deltas = (not np.isfinite(dp) or dp == 0.0)
+            dt = 1.0
         else:
-            logger.error(
-                f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'"
-            )
+            logger.error(f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'")
+            return
 
-        p_dia = compute_contour_properties(dia)
-        p_sys = compute_contour_properties(sys)
+        # If denom invalid -> we'll set delta columns to 0
+        if use_zero_deltas:
+            logger.warning(f"Setting delta columns to 0 for {self.patient_data.id} ({phase}) due to missing/invalid pressure/time.")
 
-        # p_dia[:,1] is already normalized z
-        if phase == "rest" or phase == "stress":
+        # compute contour properties safely
+        def _safe_props(arr, name):
+            try:
+                if arr is None:
+                    logger.warning(f"{name} is None for {self.patient_data.id} ({phase})")
+                    return np.empty((0, 7))
+                props = compute_contour_properties(arr)
+                if props is None:
+                    return np.empty((0, 7))
+                props = np.asarray(props, dtype=float)
+                if props.ndim != 2 or props.shape[1] < 7:
+                    logger.warning(f"{name} has unexpected shape {props.shape} for {self.patient_data.id} ({phase}); expected Nx>=7.")
+                    return np.empty((0, 7))
+                return props
+            except Exception as e:
+                logger.warning(f"Failed to compute contour properties for {name} ({self.patient_data.id}, {phase}): {e}")
+                return np.empty((0, 7))
+
+        p_dia = _safe_props(dia, "dia")
+        p_sys = _safe_props(sys, "sys")
+
+        # expected extra columns per phase
+        if p_dia.size == 0 or p_sys.size == 0:
+            # make empty DataFrame with columns for this phase (so downstream code still works)
+            common_cols = ["contour_id", "z_value", "delta_lumen_area", "delta_min_dist", "delta_max_dist", "delta_elliptic_ratio"]
+            if phase in ("rest", "stress"):
+                extra = [
+                    "lumen_area_dia", "lumen_area_sys",
+                    "min_dist_dia", "min_dist_sys",
+                    "max_dist_dia", "max_dist_sys",
+                    "elliptic_ratio_dia", "elliptic_ratio_sys",
+                    "circ_dia", "circ_sys",
+                ]
+            elif phase == "dia_dia":
+                extra = [
+                    "lumen_area_dia_rest", "lumen_area_dia_stress",
+                    "min_dist_dia_rest", "min_dist_dia_stress",
+                    "max_dist_dia_rest", "max_dist_dia_stress",
+                    "elliptic_ratio_dia_rest", "elliptic_ratio_dia_stress",
+                    "circ_dia_rest", "circ_dia_stress",
+                ]
+            else:  # sys_sys
+                extra = [
+                    "lumen_area_sys_rest", "lumen_area_sys_stress",
+                    "min_dist_sys_rest", "min_dist_sys_stress",
+                    "max_dist_sys_rest", "max_dist_sys_stress",
+                    "elliptic_ratio_sys_rest", "elliptic_ratio_sys_stress",
+                    "circ_sys_rest", "circ_sys_stress",
+                ]
+            df_empty = pd.DataFrame(columns=common_cols + extra)
+            # still attempt to merge with existing CSV if present, then store attribute
+            in_path = os.path.join(self.output_dir, f"{phase}_lumen_changes.csv")
+            if os.path.exists(in_path):
+                lum = pd.read_csv(in_path)
+                df_empty = df_empty.merge(lum, on="contour_id", how="left")
+                df_empty.to_csv(in_path, index=False)
+            if phase == "rest":
+                self.df_rest = df_empty
+            elif phase == "stress":
+                self.df_stress = df_empty
+            elif phase == "dia_dia":
+                self.df_dia = df_empty
+            elif phase == "sys_sys":
+                self.df_sys = df_empty
+            return
+
+        # align rows (truncate to shortest)
+        n_rows = min(p_dia.shape[0], p_sys.shape[0])
+        if p_dia.shape[0] != p_sys.shape[0]:
+            logger.warning(f"p_dia rows ({p_dia.shape[0]}) != p_sys rows ({p_sys.shape[0]}) for {self.patient_data.id} ({phase}); truncating to {n_rows} rows.")
+        p_dia = p_dia[:n_rows, :]
+        p_sys = p_sys[:n_rows, :]
+
+        # compute deltas: either zero (when use_zero_deltas) or (p_sys - p_dia) / (dp*dt)
+        if use_zero_deltas:
+            delta_area = np.zeros(n_rows)
+            delta_min = np.zeros(n_rows)
+            delta_max = np.zeros(n_rows)
+            delta_ell = np.zeros(n_rows)
+        else:
+            denom = float(dp) * float(dt)
+            if not np.isfinite(denom) or denom == 0.0:
+                logger.warning(f"Denominator dp*dt invalid for {self.patient_data.id} ({phase}); setting delta columns to 0.")
+                delta_area = np.zeros(n_rows)
+                delta_min = np.zeros(n_rows)
+                delta_max = np.zeros(n_rows)
+                delta_ell = np.zeros(n_rows)
+            else:
+                delta_area = (p_sys[:n_rows, 2] - p_dia[:n_rows, 2]) / denom
+                delta_min = (p_sys[:n_rows, 3] - p_dia[:n_rows, 3]) / denom
+                delta_max = (p_sys[:n_rows, 4] - p_dia[:n_rows, 4]) / denom
+                delta_ell = (p_sys[:n_rows, 5] - p_dia[:n_rows, 5]) / denom
+
+        # Build DataFrame according to phase (keeps your original column layout)
+        if phase in ("rest", "stress"):
             df = pd.DataFrame(
                 {
                     "contour_id": p_dia[:, 0].astype(int),
                     "z_value": p_dia[:, 1],
-                    "delta_lumen_area": (p_sys[:, 2] - p_dia[:, 2]) / (dp * dt),
-                    "delta_min_dist": (p_sys[:, 3] - p_dia[:, 3]) / (dp * dt),
-                    "delta_max_dist": (p_sys[:, 4] - p_dia[:, 4]) / (dp * dt),
-                    "delta_elliptic_ratio": (p_sys[:, 5] - p_dia[:, 5]) / (dp * dt),
+                    "delta_lumen_area": delta_area,
+                    "delta_min_dist": delta_min,
+                    "delta_max_dist": delta_max,
+                    "delta_elliptic_ratio": delta_ell,
                     "lumen_area_dia": p_dia[:, 2],
                     "lumen_area_sys": p_sys[:, 2],
                     "min_dist_dia": p_dia[:, 3],
@@ -476,6 +603,8 @@ class PatientPreprocessing:
                     "max_dist_sys": p_sys[:, 4],
                     "elliptic_ratio_dia": p_dia[:, 5],
                     "elliptic_ratio_sys": p_sys[:, 5],
+                    "circ_dia": p_dia[:, 6],
+                    "circ_sys": p_sys[:, 6],
                 }
             )
         elif phase == "dia_dia":
@@ -483,10 +612,10 @@ class PatientPreprocessing:
                 {
                     "contour_id": p_dia[:, 0].astype(int),
                     "z_value": p_dia[:, 1],
-                    "delta_lumen_area": (p_sys[:, 2] - p_dia[:, 2]) / (dp * dt),
-                    "delta_min_dist": (p_sys[:, 3] - p_dia[:, 3]) / (dp * dt),
-                    "delta_max_dist": (p_sys[:, 4] - p_dia[:, 4]) / (dp * dt),
-                    "delta_elliptic_ratio": (p_sys[:, 5] - p_dia[:, 5]) / (dp * dt),
+                    "delta_lumen_area": delta_area,
+                    "delta_min_dist": delta_min,
+                    "delta_max_dist": delta_max,
+                    "delta_elliptic_ratio": delta_ell,
                     "lumen_area_dia_rest": p_dia[:, 2],
                     "lumen_area_dia_stress": p_sys[:, 2],
                     "min_dist_dia_rest": p_dia[:, 3],
@@ -495,17 +624,19 @@ class PatientPreprocessing:
                     "max_dist_dia_stress": p_sys[:, 4],
                     "elliptic_ratio_dia_rest": p_dia[:, 5],
                     "elliptic_ratio_dia_stress": p_sys[:, 5],
+                    "circ_dia_rest": p_dia[:, 6],
+                    "circ_dia_stress": p_sys[:, 6],
                 }
             )
-        else:
+        else:  # sys_sys
             df = pd.DataFrame(
                 {
                     "contour_id": p_dia[:, 0].astype(int),
                     "z_value": p_dia[:, 1],
-                    "delta_lumen_area": (p_sys[:, 2] - p_dia[:, 2]) / (dp * dt),
-                    "delta_min_dist": (p_sys[:, 3] - p_dia[:, 3]) / (dp * dt),
-                    "delta_max_dist": (p_sys[:, 4] - p_dia[:, 4]) / (dp * dt),
-                    "delta_elliptic_ratio": (p_sys[:, 5] - p_dia[:, 5]) / (dp * dt),
+                    "delta_lumen_area": delta_area,
+                    "delta_min_dist": delta_min,
+                    "delta_max_dist": delta_max,
+                    "delta_elliptic_ratio": delta_ell,
                     "lumen_area_sys_rest": p_dia[:, 2],
                     "lumen_area_sys_stress": p_sys[:, 2],
                     "min_dist_sys_rest": p_dia[:, 3],
@@ -514,28 +645,32 @@ class PatientPreprocessing:
                     "max_dist_sys_stress": p_sys[:, 4],
                     "elliptic_ratio_sys_rest": p_dia[:, 5],
                     "elliptic_ratio_sys_stress": p_sys[:, 5],
+                    "circ_sys_rest": p_dia[:, 6],
+                    "circ_sys_stress": p_sys[:, 6],
                 }
             )
 
+        # CSV merge + save logic (keeps your behaviour)
         in_path = os.path.join(self.output_dir, f"{phase}_lumen_changes.csv")
         if os.path.exists(in_path):
-            lum = pd.read_csv(in_path)
-            df = df.merge(lum, on="contour_id", how="left")
-            df.to_csv(in_path, index=False)
-            if phase == "rest":
-                self.df_rest = df
-            elif phase == "stress":
-                self.df_stress = df
-            elif phase == "dia_dia":
-                self.df_dia = df
-            elif phase == "sys_sys":
-                self.df_sys = df
-            else:
-                logger.error(
-                    f"Invalid phase: {phase}, expected 'rest', 'stress', 'dia_dia' or 'sys_sys'"
-                )
+            try:
+                lum = pd.read_csv(in_path)
+                df = df.merge(lum, on="contour_id", how="left")
+                df.to_csv(in_path, index=False)
+            except Exception as e:
+                logger.error(f"Failed to merge/write {in_path}: {e}")
         else:
             logger.warning(f"Missing file: {in_path}")
+
+        # store in object for later use
+        if phase == "rest":
+            self.df_rest = df
+        elif phase == "stress":
+            self.df_stress = df
+        elif phase == "dia_dia":
+            self.df_dia = df
+        elif phase == "sys_sys":
+            self.df_sys = df
 
     def save_selected_to_global_stats(self):
         """Extensive summary functions for patients individual stats into a global dataframe.
@@ -545,6 +680,14 @@ class PatientPreprocessing:
         - Output:
             - DataFrame with selected statistics, saved to global stats directory.
         """
+        for df_name in ['df_rest', 'df_stress', 'df_dia', 'df_sys']:
+            df = getattr(self, df_name)
+            if not df.empty:
+                missing_cols = ['stretch', 'stretch_rate', 'stiffness', 'pc1_diastole', 'pc1_systole']
+                for col in missing_cols:
+                    if col not in df.columns:
+                        df[col] = np.nan
+                        logger.warning(f"Added missing column '{col}' to {df_name} for patient {self.patient_data.id}")
 
         # Helper to find first hit >= threshold, returns positional index or None
         def first_hit(df, col, phase_desc):
@@ -634,7 +777,8 @@ class PatientPreprocessing:
         im_len_sys = self.df_sys.iloc[im_pos_sys]["z_value"]
 
         # 4) Compute mean
-        im_len = (im_len_rest + im_len_stress + im_len_dia + im_len_sys) / 4
+        # im_len = (im_len_rest + im_len_stress + im_len_dia + im_len_sys) / 4
+        im_len = (im_len_rest + im_len_stress) / 2
 
         # needed for sectionwise
         im_20_per = im_len * 0.2
@@ -700,35 +844,86 @@ class PatientPreprocessing:
         def clamp(idx, df):
             return max(0, min(idx, len(df) - 1))
 
-        mla_pos_rest = clamp((ost_pos_rest - im_pos_rest) // 2, self.df_rest)
-        mla_pos_stress = clamp((ost_pos_stress - im_pos_stress) // 2, self.df_stress)
-        mla_pos_dia = clamp((ost_pos_dia - im_pos_dia) // 2, self.df_dia)
-        mla_pos_sys = clamp((ost_pos_sys - im_pos_sys) // 2, self.df_sys)
+        # mla_pos_rest = clamp((ost_pos_rest + im_pos_rest) // 2, self.df_rest)
+        # mla_pos_stress = clamp((ost_pos_stress + im_pos_stress) // 2, self.df_stress)
+        # mla_pos_dia = clamp((ost_pos_dia + im_pos_dia) // 2, self.df_dia)
+        # mla_pos_sys = clamp((ost_pos_sys + im_pos_sys) // 2, self.df_sys)
+
+        mla_pos_rest = self.df_rest["lumen_area_sys"].idxmin()
+        mla_pos_stress = self.df_stress["lumen_area_sys"].idxmin()
+        mla_pos_dia = self.df_dia["lumen_area_dia_stress"].idxmin()
+        mla_pos_sys = self.df_sys["lumen_area_sys_stress"].idxmin()
+
+        # reference position for rest and stress the location, where the greates lumen area is found
+        def _ref_pos_from_df(df, candidates):
+            available = [c for c in candidates if c in df.columns]
+            if not available:
+                logger.warning(f"{self.patient_data.id}: no lumen area colfumns found in dataframe")
+                return 0
+            
+            if len(available) == 1:
+                return df[available[0]].idxmax()
+            # row-wise max between the available lumen columns, then global max index
+            return df[available].max(axis=1).idxmax()
+
+        ref_pos_rest = _ref_pos_from_df(self.df_rest, ["lumen_area_dia", "lumen_area_sys"])
+        ref_pos_stress = _ref_pos_from_df(self.df_stress, ["lumen_area_dia", "lumen_area_sys"])
 
         # 6) Build the single-row DataFrame
         data = {
             "patient_id": [self.patient_data.id],
             "mean_intramural_length": [im_len],
             "pressure_change_pulsatile_rest": [
-                self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0]
+                (self.patient_data.pressure_rest[1] - self.patient_data.pressure_rest[0] 
+                if (self.patient_data.pressure_rest and 
+                    len(self.patient_data.pressure_rest) >= 2 and
+                    self.patient_data.pressure_rest[0] is not None and
+                    self.patient_data.pressure_rest[1] is not None)
+                else None)
             ],
             "time_change_pulsatile_rest": [
-                self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
+                (self.patient_data.time_rest[1] - self.patient_data.time_rest[0]
+                if (self.patient_data.time_rest and 
+                    len(self.patient_data.time_rest) >= 2 and
+                    self.patient_data.time_rest[0] is not None and
+                    self.patient_data.time_rest[1] is not None)
+                else None)
             ],
             "pressure_change_pulsatile_stress": [
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_stress[0]
+                (self.patient_data.pressure_stress[1] - self.patient_data.pressure_stress[0]
+                if (self.patient_data.pressure_stress and 
+                    len(self.patient_data.pressure_stress) >= 2 and
+                    self.patient_data.pressure_stress[0] is not None and
+                    self.patient_data.pressure_stress[1] is not None)
+                else None)
             ],
             "time_change_pulsatile_stress": [
-                self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
+                (self.patient_data.time_stress[1] - self.patient_data.time_stress[0]
+                if (self.patient_data.time_stress and 
+                    len(self.patient_data.time_stress) >= 2 and
+                    self.patient_data.time_stress[0] is not None and
+                    self.patient_data.time_stress[1] is not None)
+                else None)
             ],
             "pressure_change_stressind_dia": [
-                self.patient_data.pressure_stress[0]
-                - self.patient_data.pressure_rest[0]
+                (self.patient_data.pressure_stress[0] - self.patient_data.pressure_rest[0]
+                if (self.patient_data.pressure_rest and 
+                    self.patient_data.pressure_stress and
+                    len(self.patient_data.pressure_rest) >= 1 and
+                    len(self.patient_data.pressure_stress) >= 1 and
+                    self.patient_data.pressure_rest[0] is not None and
+                    self.patient_data.pressure_stress[0] is not None)
+                else None)
             ],
             "pressure_change_stressind_sys": [
-                self.patient_data.pressure_stress[1]
-                - self.patient_data.pressure_rest[1]
+                (self.patient_data.pressure_stress[1] - self.patient_data.pressure_rest[1]
+                if (self.patient_data.pressure_rest and 
+                    self.patient_data.pressure_stress and
+                    len(self.patient_data.pressure_rest) >= 2 and
+                    len(self.patient_data.pressure_stress) >= 2 and
+                    self.patient_data.pressure_rest[1] is not None and
+                    self.patient_data.pressure_stress[1] is not None)
+                else None)
             ],
             "pulsatile_rest_lumen_ost": self.df_rest.iloc[ost_pos_rest][
                 "delta_lumen_area"
@@ -958,26 +1153,52 @@ class PatientPreprocessing:
             "ost_lumen_area_sys_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"],
             "ost_lumen_area_dia_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
             "ost_lumen_area_sys_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"],
-            "ost_lumen_narrow_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
-            "ost_lumen_narrow_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
-            "ost_lumen_narrow_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
-            "ost_lumen_narrow_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
-            "mla_dia_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"],
-            "mla_sys_rest": self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"],
-            "mla_dia_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"],
-            "mla_sys_stress": self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"],
-            "mln_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
-            "mln_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
-            "mln_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
-            "mln_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
+            "ost_circ_dia_rest": self.df_rest.iloc[ost_pos_rest]["circ_dia"],
+            "ost_circ_sys_rest": self.df_rest.iloc[ost_pos_rest]["circ_sys"],
+            "ost_circ_dia_stress": self.df_stress.iloc[ost_pos_stress]["circ_dia"],
+            "ost_circ_sys_stress": self.df_stress.iloc[ost_pos_stress]["circ_sys"],
+            # "ost_lumen_narrow_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
+            # "ost_lumen_narrow_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
+            # "ost_lumen_narrow_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
+            # "ost_lumen_narrow_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
+            "mla_dia_rest": self.df_rest.iloc[mla_pos_rest]["lumen_area_dia"],
+            "mla_sys_rest": self.df_rest.iloc[mla_pos_rest]["lumen_area_sys"],
+            "mla_dia_stress": self.df_stress.iloc[mla_pos_stress]["lumen_area_dia"],
+            "mla_sys_stress": self.df_stress.iloc[mla_pos_stress]["lumen_area_sys"],
+            "mla_circ_dia_rest": self.df_rest.iloc[mla_pos_rest]["circ_dia"],
+            "mla_circ_sys_rest": self.df_rest.iloc[mla_pos_rest]["circ_sys"],
+            "mla_circ_dia_stress": self.df_stress.iloc[mla_pos_stress]["circ_dia"],
+            "mla_circ_sys_stress": self.df_stress.iloc[mla_pos_stress]["circ_sys"],
+            "mla_z_position_rest": self.df_rest.iloc[mla_pos_rest]["z_value"],
+            "mla_z_position_stress": self.df_stress.iloc[mla_pos_stress]["z_value"],
+            # "mln_dia_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_dia"] / self.df_rest.iloc[0]["lumen_area_dia"]),
+            # "mln_sys_rest": 1 - (self.df_rest.iloc[ost_pos_rest]["lumen_area_sys"] / self.df_rest.iloc[0]["lumen_area_sys"]),
+            # "mln_dia_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_dia"] / self.df_stress.iloc[0]["lumen_area_dia"]),
+            # "mln_sys_stress": 1 - (self.df_stress.iloc[ost_pos_stress]["lumen_area_sys"] / self.df_stress.iloc[0]["lumen_area_sys"]),
+            "ref_area_dia_rest": self.df_rest.iloc[ref_pos_rest]["lumen_area_dia"],
+            "ref_area_sys_rest": self.df_rest.iloc[ref_pos_rest]["lumen_area_sys"],
+            "ref_area_dia_stress": self.df_stress.iloc[ref_pos_stress]["lumen_area_dia"],
+            "ref_area_sys_stress": self.df_stress.iloc[ref_pos_stress]["lumen_area_sys"],
+            "ref_circ_dia_rest": self.df_rest.iloc[ref_pos_rest]["circ_dia"],
+            "ref_circ_sys_rest": self.df_rest.iloc[ref_pos_rest]["circ_sys"],
+            "ref_circ_dia_stress": self.df_stress.iloc[ref_pos_stress]["circ_dia"],
+            "ref_circ_sys_stress": self.df_stress.iloc[ref_pos_stress]["circ_sys"],
             "ost_min_dist_dia_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
             "ost_min_dist_sys_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_sys"],
             "ost_min_dist_dia_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
             "ost_min_dist_sys_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_sys"],
-            "mla_min_dist_dia_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_dia"],
-            "mla_min_dist_sys_rest": self.df_rest.iloc[ost_pos_rest]["min_dist_sys"],
-            "mla_min_dist_dia_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_dia"],
-            "mla_min_dist_sys_stress": self.df_stress.iloc[ost_pos_stress]["min_dist_sys"],
+            "mla_min_dist_dia_rest": self.df_rest.iloc[mla_pos_rest]["min_dist_dia"],
+            "mla_min_dist_sys_rest": self.df_rest.iloc[mla_pos_rest]["min_dist_sys"],
+            "mla_min_dist_dia_stress": self.df_stress.iloc[mla_pos_stress]["min_dist_dia"],
+            "mla_min_dist_sys_stress": self.df_stress.iloc[mla_pos_stress]["min_dist_sys"],
+            "ost_max_dist_dia_rest": self.df_rest.iloc[ost_pos_rest]["max_dist_dia"],
+            "ost_max_dist_sys_rest": self.df_rest.iloc[ost_pos_rest]["max_dist_sys"],
+            "ost_max_dist_dia_stress": self.df_stress.iloc[ost_pos_stress]["max_dist_dia"],
+            "ost_max_dist_sys_stress": self.df_stress.iloc[ost_pos_stress]["max_dist_sys"],
+            "mla_max_dist_dia_rest": self.df_rest.iloc[mla_pos_rest]["max_dist_dia"],
+            "mla_max_dist_sys_rest": self.df_rest.iloc[mla_pos_rest]["max_dist_sys"],
+            "mla_max_dist_dia_stress": self.df_stress.iloc[mla_pos_stress]["max_dist_dia"],
+            "mla_max_dist_sys_stress": self.df_stress.iloc[mla_pos_stress]["max_dist_sys"],
         }
 
         # 7) Add section stats to the output DataFrame

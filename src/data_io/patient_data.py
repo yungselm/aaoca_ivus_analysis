@@ -75,6 +75,9 @@ class LoadIndividualData:
         in /processed and /3d_ivus. The patient id (e.g., narco_1) can appear in
         any case (upper/lower) and directories may have additional info, e.g.,
         NARCO_1_pressure_eval.
+
+        Returns a tuple of (pressure_dir|None, ivus_dir|None, loess_dir|None).
+        Missing directories are logged as warnings instead of raising.
         """
         processed_base_dir = self.working_dir / "processed"
         ivus_base_dir = self.working_dir / "3d_ivus"
@@ -82,41 +85,55 @@ class LoadIndividualData:
 
         def find_matching_dir(base_dir: Path) -> Optional[Path]:
             if not base_dir.is_dir():
+                logger.warning(f"Based directory does not exist: {base_dir}")
                 return None
             for d in base_dir.iterdir():
-                if d.is_dir() and self.id.lower() in d.name.lower():
+                if d.is_dir() and self.id and self.id.lower() in d.name.lower():
                     return d
+            logger.warning(f"No matching directory for id '{self.id}' in {base_dir}")
             return None
 
         pressure_dir: Optional[Path] = find_matching_dir(processed_base_dir)
         ivus_dir: Optional[Path] = find_matching_dir(ivus_base_dir)
         loess_dir: Optional[Path] = find_matching_dir(loess_base_dir)
 
-        if pressure_dir is None:
-            raise FileNotFoundError(
-                f"No processed data directory for {self.id} in {processed_base_dir}"
-            )
-        m = re.search(r'(narco_[0-9]+)', pressure_dir.name, flags=re.IGNORECASE)
-        if m:
-            self.file_id = m.group(1).lower()   # e.g. "narco_303"
+        if pressure_dir is not None:
+            m = re.search(r"(narco_[0-9]+)", pressure_dir.name, flags=re.IGNORECASE)
+            if m:
+                self.file_id = m.group(1).lower()  # e.g. "narco_303"
         else:
-            self.file_id = self.id 
+            logger.warning(
+                f"No processed data directory for {self.id} in {processed_base_dir}; "
+                "continuing with file_id set to provided id."
+            )
 
         if ivus_dir is None:
-            raise FileNotFoundError(
-                f"No IVUS data directory for {self.id} in {ivus_base_dir}"
+            logger.warning(
+                f"No IVUS data directory for {self.id} in {ivus_base_dir}; IVUS loading will be skipped."
             )
         if loess_dir is None:
-            raise FileNotFoundError(
-                f"No Loess data directory for {self.id} in {loess_dir}"
+            logger.warning(
+                f"No Loess data directory for {self.id} in {loess_base_dir}; Loess-related data will be missing."
             )
 
         return pressure_dir, ivus_dir, loess_dir
+
 
     def process_pressure(self) -> None:
         patterns = ["rest_1", "dobu"]
         tuples_pressure: List[Tuple[Optional[float], Optional[float]]] = []
         tuples_time: List[Tuple[Optional[float], Optional[float]]] = []
+
+        if self.pressure_dir is None or not self.pressure_dir.is_dir():
+            logger.warning(
+                f"Pressure directory not found for {self.id}; pressure values will be left as None."
+            )
+            # fill with (None, None) for both phases
+            self.patient_data.pressure_rest = (None, None)
+            self.patient_data.pressure_stress = (None, None)
+            self.patient_data.time_rest = (None, None)
+            self.patient_data.time_stress = (None, None)
+            return
 
         for phase in patterns:
             filename = f"{self.file_id}_pressure_{phase}_average_curve_all.csv"
@@ -134,13 +151,31 @@ class LoadIndividualData:
                 tuples_pressure.append((None, None))
                 tuples_time.append((None, None))
 
-        (self.patient_data.pressure_rest, self.patient_data.pressure_stress) = (
-            tuples_pressure
-        )
-        (self.patient_data.time_rest, self.patient_data.time_stress) = tuples_time
+        # Ensure we always set both rest and stress even if some phases failed
+        if len(tuples_pressure) >= 2:
+            (self.patient_data.pressure_rest, self.patient_data.pressure_stress) = (
+                tuples_pressure[0],
+                tuples_pressure[1],
+            )
+            (self.patient_data.time_rest, self.patient_data.time_stress) = (
+                tuples_time[0],
+                tuples_time[1],
+            )
+        else:
+            # fallback if something very odd happened
+            self.patient_data.pressure_rest = tuples_pressure[0] if tuples_pressure else (None, None)
+            self.patient_data.pressure_stress = tuples_pressure[1] if len(tuples_pressure) > 1 else (None, None)
+            self.patient_data.time_rest = tuples_time[0] if tuples_time else (None, None)
+            self.patient_data.time_stress = tuples_time[1] if len(tuples_time) > 1 else (None, None)
 
     def load_obj_data(self) -> None:
-        """Loads the .obj files with the 3D aligned IVUS images and assigns to patient_data."""
+        """Loads the .obj files with the 3D aligned IVUS images and assigns to patient_data.
+        Missing files/folders are warned about and skipped (attributes remain None).
+        """
+        if self.ivus_dir is None or not self.ivus_dir.is_dir():
+            logger.warning(f"IVUS directory not available for {self.id}; skipping OBJ loading.")
+            return
+
         states = ["rest", "stress"]
         objects = ["mesh", "catheter", "wall"]
         phases = {"dia": "000", "sys": "029"}
@@ -153,7 +188,8 @@ class LoadIndividualData:
                 if d.is_dir() and d.name.lower() == state
             ]
             if not candidates:
-                raise FileNotFoundError(f"No '{state}' directory in {self.ivus_dir}")
+                logger.warning(f"No '{state}' directory in {self.ivus_dir}; skipping {state} files.")
+                continue
             state_dir = candidates[0]
 
             for obj in objects:
@@ -161,9 +197,15 @@ class LoadIndividualData:
                     filename = f"{obj}_{idx}_{state}.obj"
                     path = state_dir / filename
                     if not path.exists():
-                        raise FileNotFoundError(f"Missing: {path}")
+                        logger.warning(f"Missing: {path}; skipping this file.")
+                        continue
 
-                    arr = self._read_obj_file(path)
+                    try:
+                        arr = self._read_obj_file(path)
+                    except Exception as e:
+                        logger.error(f"Failed to read {path}: {e}")
+                        continue
+
                     # map mesh -> contours
                     key_obj = "contours" if obj == "mesh" else obj
                     attr = f"{state}_{key_obj}_{phase}"
@@ -178,16 +220,23 @@ class LoadIndividualData:
         for comp_dir, (phase_key, phase_label) in comp_folders.items():
             base = self.ivus_dir / comp_dir
             if not base.is_dir():
-                raise FileNotFoundError(f"Missing comparison folder: {base}")
+                logger.warning(f"Missing comparison folder: {base}; skipping.")
+                continue
 
             for obj in objects:
                 for phase_suffix, idx in phases.items():  # phase_suffix is "dia"/"sys", idx "000"/"029"
                     filename = f"{obj}_{idx}_{phase_label}.obj"
                     path = base / filename
                     if not path.exists():
-                        raise FileNotFoundError(f"Missing: {path}")
+                        logger.warning(f"Missing: {path}; skipping.")
+                        continue
 
-                    arr = self._read_obj_file(path)
+                    try:
+                        arr = self._read_obj_file(path)
+                    except Exception as e:
+                        logger.error(f"Failed to read {path}: {e}")
+                        continue
+
                     key_obj = "contours" if obj == "mesh" else obj
 
                     # Determine rest vs stress by idx:
@@ -198,19 +247,30 @@ class LoadIndividualData:
 
     @staticmethod
     def _read_obj_file(obj_filename: Path) -> np.ndarray:
+        """
+        Reads vertex lines from an .obj file and returns an ndarray with rows:
+        [contour_idx, x, y, z]. If no vertices are found, returns an empty (0,4) array
+        and logs a warning rather than raising.
+        """
         obj_points: List[List[float]] = []
-        with open(obj_filename, "r") as f:
-            for line in f:
-                if line.startswith("v "):
-                    parts = line.split()
-                    try:
-                        x, y, z = map(float, parts[1:4])
-                        obj_points.append([x, y, z])
-                    except (ValueError, IndexError):
-                        continue
+        try:
+            with open(obj_filename, "r") as f:
+                for line in f:
+                    if line.startswith("v "):
+                        parts = line.split()
+                        try:
+                            x, y, z = map(float, parts[1:4])
+                            obj_points.append([x, y, z])
+                        except (ValueError, IndexError):
+                            # skip malformed lines but continue parsing
+                            continue
+        except Exception as e:
+            logger.error(f"Unable to open/read {obj_filename}: {e}")
+            return np.empty((0, 4))
 
         if not obj_points:
-            raise ValueError(f"No vertices found in {obj_filename}")
+            logger.warning(f"No vertices found in {obj_filename}; returning empty array.")
+            return np.empty((0, 4))
 
         # Group points by z-value and sort contours from lowest to highest z
         z_groups: dict[float, list[list[float]]] = {}
